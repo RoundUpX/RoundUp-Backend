@@ -50,10 +50,9 @@ type Transaction struct {
 }
 
 type TransactionService struct {
-	repo            TransactionRepository
-	userRepo        UserRepository
-	upiClient       UPIClient
-	notificationSvc NotificationService
+	repo      TransactionRepository
+	userRepo  UserRepository
+	upiClient UPIClient
 }
 
 type TransactionRepository interface {
@@ -71,11 +70,6 @@ type UserRepository interface {
 
 type UPIClient interface {
 	TransferFunds(userID string, amount float64) error
-}
-
-type NotificationService interface {
-	Send(userID string, message string) error
-	SendTxnNotification(userID string, transaction Transaction)
 }
 
 func main() {
@@ -148,6 +142,14 @@ func validateToken(tokenString string) (*CustomClaims, error) {
 	}
 
 	return nil, errors.New("invalid token claims")
+}
+
+func loginHandler(c *gin.Context) {
+	// TODO: Implement real login logic
+}
+
+func registerHandler(c *gin.Context) {
+	// TODO: Implement user registration
 }
 
 func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) error {
@@ -225,9 +227,6 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 	if err := s.userRepo.UpdatePreferences(userID, user.Preferences); err != nil {
 		return fmt.Errorf("failed to update user preferences: %v", err)
 	}
-
-	// Send txn notif
-	s.notificationSvc.SendTxnNotification(userID, transaction)
 
 	return nil
 }
