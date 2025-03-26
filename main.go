@@ -1,12 +1,15 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 // define magic numbers
@@ -110,8 +113,8 @@ func authMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		claims, err = validateToken(token)
-		if err != nill {
+		claims, err := validateToken(token)
+		if err != nil {
 			c.JSON(401, gin.H{"error": "Invalid token"})
 			c.Abort()
 			return
@@ -121,6 +124,26 @@ func authMiddleware() gin.HandlerFunc {
 		c.Set("userID", claims.UserID)
 		c.Next()
 	}
+}
+
+func validateToken(tokenString string) (*jwt.RegisteredClaims, error) {
+	// Parse the token with RegisteredClaims
+	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{},
+		func(token *jwt.Token) (interface{}, error) {
+			return []byte(os.Getenv("JWT_SECRET")), nil
+		})
+
+	// Check if token is nil or if an error occurred during parsing.
+	if err != nil || token == nil {
+		return nil, errors.New("invalid token")
+	}
+
+	// Extract and return the claims if the token is valid.
+	if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, errors.New("invalid token claims")
 }
 
 func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) error {
