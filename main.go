@@ -14,7 +14,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // define magic numbers
@@ -30,6 +32,7 @@ type User struct {
 	ID          string          `json:"id"`
 	Name        string          `json:"name"`
 	Email       string          `json:"email"`
+	Password    string          `json:"-"` // omit from JSON responses
 	Preferences UserPreferences `json:"preferences"`
 	CreatedAt   time.Time       `json:"created_at"`
 }
@@ -69,6 +72,8 @@ type UserRepository interface {
 	FindByID(id string) (*User, error)
 	Update(user *User) error
 	UpdatePreferences(userID string, prefs UserPreferences) error
+	CreateUser(user *User) error
+	GetUserByEmail(email string) (*User, error)
 }
 
 type UPIClient interface {
@@ -164,11 +169,84 @@ func validateToken(tokenString string) (*CustomClaims, error) {
 }
 
 func loginHandler(c *gin.Context) {
-	// TODO: Implement real login logic
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	err := c.BindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	user, err := txnService.userRepo.GetUserByEmail(req.Email)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+		return
+	}
+
+	claims := CustomClaims{
+		UserID: user.ID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(72 * time.Hour)),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString([]byte(os.Getenv("JWT_SECRET")))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"token": tokenString})
 }
 
 func registerHandler(c *gin.Context) {
-	// TODO: Implement user registration
+	var req struct {
+		Name     string `json:"name"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	err := c.BindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	if req.Name == "" || req.Email == "" || req.Password == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Name, email, and password are required"})
+		return
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process password"})
+		return
+	}
+
+	newUser := User{
+		ID:        uuid.New().String(),
+		Name:      req.Name,
+		Email:     req.Email,
+		Password:  string(hashedPassword),
+		CreatedAt: time.Now(),
+	}
+
+	err = txnService.userRepo.CreateUser(&newUser)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
 func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) error {
@@ -306,6 +384,12 @@ func connectDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	err = db.Ping()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	return db, nil
 }
 
@@ -423,4 +507,20 @@ func (r *PostgresUserRepository) updatePreferencesInTx(tx *sql.Tx, userID string
 		pq.Array(prefs.RoundupDates),
 		userID)
 	return err
+}
+
+func (r *PostgresUserRepository) CreateUser(user *User) error {
+	query := "INSERT INTO users (id, name, email, password, created_at) VALUES ($1, $2, $3, $4, $5)"
+	_, err := r.db.Exec(query, user.ID, user.Name, user.Email, user.Password, user.CreatedAt)
+	return err
+}
+
+func (r *PostgresUserRepository) GetUserByEmail(email string) (*User, error) {
+	var user User
+	query := "SELECT id, name, email, password, created_at FROM users WHERE email = $1"
+	err := r.db.QueryRow(query, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
 }
