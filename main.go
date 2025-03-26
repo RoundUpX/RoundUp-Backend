@@ -108,11 +108,12 @@ func main() {
 	authorized.Use(authMiddleware())
 	{
 		authorized.GET("/transactions", getTransactionsHandler)
+		authorized.POST("/transaction", addTransactionHandler)
 		// authorized.POST("/connect-upi", connectUPIHandler)
 		// TODO: UPI
 	}
 
-	router.Run(":1717")
+	router.Run(":8082")
 }
 
 // returns a gin middleware function for each request
@@ -523,4 +524,38 @@ func (r *PostgresUserRepository) GetUserByEmail(email string) (*User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+func addTransactionHandler(c *gin.Context) {
+
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid userID format"})
+		return
+	}
+
+	var txn Transaction
+	err := c.BindJSON(&txn)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid transaction input"})
+		return
+	}
+
+	txn.UserID = uid
+	txn.ID = uuid.New().String()
+	txn.CreatedAt = time.Now()
+
+	err = txnService.ProcessRoundup(uid, txn)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Transaction added successfully", "transaction": txn})
 }
