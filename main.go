@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -47,6 +48,7 @@ type Transaction struct {
 	Category  string    `json:"category"`
 	Roundup   float64   `json:"roundup"`
 	CreatedAt time.Time `json:"created_at"`
+	Merchant  string    `json:"merchant"`
 }
 
 type TransactionService struct {
@@ -55,6 +57,7 @@ type TransactionService struct {
 	upiClient UPIClient
 }
 
+// TODO: select database to implement all these interfaces
 type TransactionRepository interface {
 	SaveTransaction(tx Transaction) error
 	GetTransactionsByUserID(userID string) ([]Transaction, error)
@@ -78,7 +81,6 @@ func main() {
 	// public routes
 	router.POST("/api/v1/auth/register", registerHandler)
 	router.POST("/api/v1/auth/login", loginHandler)
-
 	// protected routes
 	authorized := router.Group("/api/v1")
 	authorized.Use(authMiddleware())
@@ -100,7 +102,7 @@ func authMiddleware() gin.HandlerFunc {
 
 		if token == "" {
 			// send HTTP request back to client with error 401
-			c.JSON(401, gin.H{"error": "Authorization required"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization required"})
 
 			// stop handling this request
 			c.Abort()
@@ -109,7 +111,7 @@ func authMiddleware() gin.HandlerFunc {
 
 		claims, err := validateToken(token)
 		if err != nil {
-			c.JSON(401, gin.H{"error": "Invalid token"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 			c.Abort()
 			return
 		}
@@ -251,6 +253,31 @@ func contains(categories []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func getTransactionsHandler(c *gin.Context) {
+
+	// get userID from gin Context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "userID not found"})
+		return
+	}
+
+	// check if it is of correct format
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid userID type"})
+		return
+	}
+
+	transactions, err := txnService.repo.GetTransactionsByUserID(uid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, g.H{"error": "failed to retrieve transactions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, transactions)
 }
 
 // TODO: Implement data access layer
