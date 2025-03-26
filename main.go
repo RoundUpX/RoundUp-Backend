@@ -3,14 +3,19 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"database/sql"
+
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lib/pq"
+	_ "github.com/lib/pq"
 )
 
 // define magic numbers
@@ -52,9 +57,9 @@ type Transaction struct {
 }
 
 type TransactionService struct {
-	repo      TransactionRepository
-	userRepo  UserRepository
-	upiClient UPIClient
+	repo     TransactionRepository
+	userRepo UserRepository
+	// upiClient UPIClient
 }
 
 // TODO: select database to implement all these interfaces
@@ -75,7 +80,24 @@ type UPIClient interface {
 	TransferFunds(userID string, amount float64) error
 }
 
+var txnService *TransactionService
+
 func main() {
+
+	db, err := connectDB()
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
+
+	txRepo := &PostgresTransactionRepository{db: db}
+	userRepo := &PostgresUserRepository{db: db}
+
+	txnService = &TransactionService{
+		repo:     txRepo,
+		userRepo: userRepo,
+	}
+
 	router := gin.Default()
 
 	// public routes
@@ -86,7 +108,7 @@ func main() {
 	authorized.Use(authMiddleware())
 	{
 		authorized.GET("/transactions", getTransactionsHandler)
-		authorized.POST("/connect-upi", connectUPIHandler)
+		// authorized.POST("/connect-upi", connectUPIHandler)
 		// TODO: more routes
 	}
 
@@ -273,11 +295,138 @@ func getTransactionsHandler(c *gin.Context) {
 
 	transactions, err := txnService.repo.GetTransactionsByUserID(uid)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, g.H{"error": "failed to retrieve transactions"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve transactions"})
 		return
 	}
 
 	c.JSON(http.StatusOK, transactions)
 }
 
-// TODO: Implement data access layer
+// Data access layer
+
+func connectDB() (*sql.DB, error) {
+	connStr := "user=roundup_user password=roundup123 dbname=roundup sslmode=disable"
+	db, err := sql.Open("postgres", connStr)
+
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
+}
+
+type PostgresTransactionRepository struct {
+	db *sql.DB
+}
+
+func (r *PostgresTransactionRepository) SaveTransaction(tx Transaction) error {
+
+	query := "INSERT INTO transactions (id, user_id, amount, category, roundup, created_at, merchant) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+	_, err := r.db.Exec(query, tx.ID, tx.UserID, tx.Amount, tx.Category, tx.Roundup, tx.CreatedAt, tx.Merchant)
+	return err
+}
+
+func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) ([]Transaction, error) {
+
+	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant FROM transactions WHERE user_id = $1"
+	rows, err := r.db.Query(query, userID)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var transactions []Transaction
+	for rows.Next() {
+		var tx Transaction
+		err := rows.Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
+
+		// TODO: think if you wanna pass or stop
+		if err != nil {
+			return nil, err
+		}
+
+		transactions = append(transactions, tx)
+	}
+
+	return transactions, nil
+}
+
+type PostgresUserRepository struct {
+	db *sql.DB
+}
+
+func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
+
+	var user User
+	query := "SELECT id, name, email, created_at FROM users WHERE id = $1"
+
+	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch user preferences separately
+	query = "SELECT roundup_categories, goal_amount, target_date, current_savings, average_roundup FROM user_preferences WHERE user_id = $1"
+	err = r.db.QueryRow(query, id).Scan(
+		&user.Preferences.RoundupCategories,
+		&user.Preferences.GoalAmount,
+		&user.Preferences.TargetDate,
+		&user.Preferences.CurrentSavings,
+		&user.Preferences.AverageRoundup,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *PostgresUserRepository) UpdatePreferences(userID string, prefs UserPreferences) error {
+
+	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5 WHERE user_id = $6"
+	_, err := r.db.Exec(query, prefs.RoundupCategories, prefs.GoalAmount, prefs.TargetDate, prefs.CurrentSavings, prefs.AverageRoundup, userID)
+	return err
+}
+
+// Add this method to your PostgresUserRepository struct
+func (r *PostgresUserRepository) Update(user *User) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+
+	// Update basic user info
+	_, err = tx.Exec("UPDATE users SET name = $1, email = $2 WHERE id = $3",
+		user.Name, user.Email, user.ID)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Update user preferences
+	err = r.updatePreferencesInTx(tx, user.ID, user.Preferences)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// Helper method for transaction-based preference updates
+func (r *PostgresUserRepository) updatePreferencesInTx(tx *sql.Tx, userID string, prefs UserPreferences) error {
+
+	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5, roundup_history = $6, roundup_dates = $7 WHERE user_id = $8"
+
+	_, err := tx.Exec(query,
+		pq.Array(prefs.RoundupCategories),
+		prefs.GoalAmount,
+		prefs.TargetDate,
+		prefs.CurrentSavings,
+		prefs.AverageRoundup,
+		pq.Array(prefs.RoundupHistory),
+		pq.Array(prefs.RoundupDates),
+		userID)
+	return err
+}
