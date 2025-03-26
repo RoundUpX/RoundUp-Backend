@@ -15,16 +15,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/lib/pq"
-	_ "github.com/lib/pq"
 )
 
 // define magic numbers
 // TODO: Decide all these!!!
 const BaseRoundupPercent = 0.05
-const DefaultAvgTxnThreshold = 30
 const RecentPeriodDays = 7
 const MinPressure = 0.5
-const MaxPressure = 2
+const MaxPressure = 5
 const DefaultAvgTxnsPerDay = 2
 
 // Define all structs
@@ -62,18 +60,15 @@ type TransactionService struct {
 	// upiClient UPIClient
 }
 
-// TODO: select database to implement all these interfaces
 type TransactionRepository interface {
 	SaveTransaction(tx Transaction) error
 	GetTransactionsByUserID(userID string) ([]Transaction, error)
-	// Other methods as needed
 }
 
 type UserRepository interface {
 	FindByID(id string) (*User, error)
 	Update(user *User) error
 	UpdatePreferences(userID string, prefs UserPreferences) error
-	// Other methods as needed
 }
 
 type UPIClient interface {
@@ -109,7 +104,7 @@ func main() {
 	{
 		authorized.GET("/transactions", getTransactionsHandler)
 		// authorized.POST("/connect-upi", connectUPIHandler)
-		// TODO: more routes
+		// TODO: UPI
 	}
 
 	router.Run(":1717")
@@ -341,7 +336,6 @@ func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) (
 		var tx Transaction
 		err := rows.Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
 
-		// TODO: think if you wanna pass or stop
 		if err != nil {
 			return nil, err
 		}
