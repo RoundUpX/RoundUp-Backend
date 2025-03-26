@@ -264,7 +264,7 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	baseRoundup := slabBasedRoundup(transaction.Amount*(1+BaseRoundupPercent)) - transaction.Amount
 
-	daysRemaining := math.Floor(user.Preferences.TargetDate.Sub(time.Now()).Hours() / 24)
+	daysRemaining := math.Floor(time.Until(user.Preferences.TargetDate).Hours() / 24)
 	// minimum 1 day
 	daysRemaining = math.Max(1, daysRemaining)
 
