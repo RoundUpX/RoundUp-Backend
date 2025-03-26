@@ -27,6 +27,8 @@ const MinPressure = 0.5
 const MaxPressure = 5
 const DefaultAvgTxnsPerDay = 2
 
+const roundUpAccount = "meet1771.mm@okhdfcbank"
+
 // Define all structs
 type User struct {
 	ID          string          `json:"id"`
@@ -54,13 +56,13 @@ type Transaction struct {
 	Category  string    `json:"category"`
 	Roundup   float64   `json:"roundup"`
 	CreatedAt time.Time `json:"created_at"`
-	Merchant  string    `json:"merchant"`
+	Merchant  string    `json:"merchant"` // upi
 }
 
 type TransactionService struct {
-	repo     TransactionRepository
-	userRepo UserRepository
-	// upiClient UPIClient
+	repo      TransactionRepository
+	userRepo  UserRepository
+	upiClient UPIClient
 }
 
 type TransactionRepository interface {
@@ -77,11 +79,9 @@ type UserRepository interface {
 	GetUserByEmail(email string) (*User, error)
 }
 
-/*
 type UPIClient interface {
-	TransferFunds(userID string, amount float64) error
+	GenerateUPIURI(fromUserID, toAccount string, amount float64) (string, error)
 }
-*/
 
 var txnService *TransactionService
 
@@ -95,10 +95,12 @@ func main() {
 
 	txRepo := &PostgresTransactionRepository{db: db}
 	userRepo := &PostgresUserRepository{db: db}
+	UPIclient := &DummyUPIClient{}
 
 	txnService = &TransactionService{
-		repo:     txRepo,
-		userRepo: userRepo,
+		repo:      txRepo,
+		userRepo:  userRepo,
+		upiClient: UPIclient,
 	}
 
 	router := gin.Default()
@@ -254,17 +256,17 @@ func registerHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
-func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) error {
+func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) (string, string, error) {
 
 	// find the user in userRepo to get their preferences
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
-		return fmt.Errorf("User not found: %v", err)
+		return "", "", fmt.Errorf("User not found: %v", err)
 	}
 
 	// if the transaction category is not present in the users pref category, return nill
 	if !contains(user.Preferences.RoundupCategories, transaction.Category) {
-		return nil
+		return "", "", nil
 	}
 
 	baseRoundup := slabBasedRoundup(transaction.Amount*(1+BaseRoundupPercent)) - transaction.Amount
@@ -276,7 +278,7 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 	remainingAmount := user.Preferences.GoalAmount - user.Preferences.CurrentSavings
 	requiredTxns := math.Floor(remainingAmount / user.Preferences.AverageRoundup)
 
-	// fefine the period for recent transactions
+	// define the period for recent transactions
 	recentPeriod := RecentPeriodDays * 24 * time.Hour
 	cutoff := time.Now().Add(-recentPeriod)
 
@@ -293,7 +295,6 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 	if len(recentDates) > 0 {
 		avgTxnsPerDay = float64(len(recentDates)) / RecentPeriodDays
 	} else {
-		// TODO:
 		avgTxnsPerDay = DefaultAvgTxnsPerDay
 	}
 
@@ -315,10 +316,8 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	// add to the transaction repo
 	if err := s.repo.SaveTransaction(transaction); err != nil {
-		return fmt.Errorf("failed to update transaction: %v", err)
+		return "", "", fmt.Errorf("failed to update transaction: %v", err)
 	}
-
-	// TODO: UPI / Saving to wallet goes here
 
 	// update user pref
 	user.Preferences.CurrentSavings += Roundup
@@ -327,10 +326,22 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	// Save pref to user repo
 	if err := s.userRepo.UpdatePreferences(userID, user.Preferences); err != nil {
-		return fmt.Errorf("failed to update user preferences: %v", err)
+		return "", "", fmt.Errorf("failed to update user preferences: %v", err)
 	}
 
-	return nil
+	// UPI Part
+
+	merchantURI, err := s.upiClient.GenerateUPIURI(userID, transaction.Merchant, transaction.Amount)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate UPI URI for merchant: %v", err)
+	}
+
+	roundupURI, err := s.upiClient.GenerateUPIURI(userID, roundUpAccount, transaction.Amount)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate UPI URI for RoundUp: %v", err)
+	}
+
+	return merchantURI, roundupURI, nil
 }
 
 func slabBasedRoundup(amount float64) float64 {
@@ -568,13 +579,20 @@ func addTransactionHandler(c *gin.Context) {
 	txn.ID = uuid.New().String()
 	txn.CreatedAt = time.Now()
 
-	err = txnService.ProcessRoundup(uid, txn)
+	merchantURI, roundupURI, err := txnService.ProcessRoundup(uid, txn)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Transaction added successfully", "transaction": txn})
+	response := gin.H{
+		"message":      "Transaction added successfully",
+		"transaction":  txn,
+		"merchant_uri": merchantURI,
+		"roundup_uri":  roundupURI,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func getTransactionByIDHandler(c *gin.Context) {
@@ -610,4 +628,12 @@ func getTransactionByIDHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, tx)
+}
+
+type DummyUPIClient struct{}
+
+func (d *DummyUPIClient) GenerateUPIURI(fromUserID, toAccount string, amount float64) (string, error) {
+
+	upiURI := fmt.Sprintf("upi://pay?pa=%s&pn=%s&am=%.2f&cu=INR", toAccount, fromUserID, amount)
+	return upiURI, nil
 }
