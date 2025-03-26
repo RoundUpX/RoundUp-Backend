@@ -126,20 +126,24 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-func validateToken(tokenString string) (*jwt.RegisteredClaims, error) {
-	// Parse the token with RegisteredClaims
-	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{},
+type CustomClaims struct {
+	jwt.RegisteredClaims
+	UserID string `json:"user_id"`
+}
+
+func validateToken(tokenString string) (*CustomClaims, error) {
+	// Parse the token with CustomClaims
+	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{},
 		func(token *jwt.Token) (interface{}, error) {
 			return []byte(os.Getenv("JWT_SECRET")), nil
 		})
 
-	// Check if token is nil or if an error occurred during parsing.
-	if err != nil || token == nil {
-		return nil, errors.New("invalid token")
+	if err != nil {
+		return nil, err
 	}
 
-	// Extract and return the claims if the token is valid.
-	if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok && token.Valid {
+	// Check if token is nil or if an error occurred during parsing.
+	if claims, ok := token.Claims.(*CustomClaims); ok && token.Valid {
 		return claims, nil
 	}
 
