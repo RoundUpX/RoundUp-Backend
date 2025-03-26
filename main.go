@@ -66,6 +66,7 @@ type TransactionService struct {
 type TransactionRepository interface {
 	SaveTransaction(tx Transaction) error
 	GetTransactionsByUserID(userID string) ([]Transaction, error)
+	GetTransactionByID(id string) (*Transaction, error)
 }
 
 type UserRepository interface {
@@ -76,9 +77,11 @@ type UserRepository interface {
 	GetUserByEmail(email string) (*User, error)
 }
 
+/*
 type UPIClient interface {
 	TransferFunds(userID string, amount float64) error
 }
+*/
 
 var txnService *TransactionService
 
@@ -109,6 +112,7 @@ func main() {
 	{
 		authorized.GET("/transactions", getTransactionsHandler)
 		authorized.POST("/transaction", addTransactionHandler)
+		authorized.GET("/transactions/:id", getTransactionByIDHandler)
 		// authorized.POST("/connect-upi", connectUPIHandler)
 		// TODO: UPI
 	}
@@ -431,6 +435,19 @@ func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) (
 	return transactions, nil
 }
 
+func (r *PostgresTransactionRepository) GetTransactionByID(id string) (*Transaction, error) {
+	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant FROM transactions WHERE id = $1"
+
+	var tx Transaction
+	err := r.db.QueryRow(query, id).Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &tx, nil
+}
+
 type PostgresUserRepository struct {
 	db *sql.DB
 }
@@ -558,4 +575,39 @@ func addTransactionHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Transaction added successfully", "transaction": txn})
+}
+
+func getTransactionByIDHandler(c *gin.Context) {
+
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	// Get the transaction ID from the URL parameter
+	txID := c.Param("id")
+	if txID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Transaction ID is required"})
+		return
+	}
+
+	tx, err := txnService.repo.GetTransactionByID(txID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
+		return
+	}
+
+	if tx.UserID != uid {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	c.JSON(http.StatusOK, tx)
 }
