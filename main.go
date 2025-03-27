@@ -762,13 +762,13 @@ func (d *DummyUPIClient) GenerateUPIURI(txn Transaction, toAccount string, amoun
 	}
 
 	query := url.Values{}
-	query.Add("pa", toAccount)                        // Payee address
-	query.Add("pn", strings.Split(toAccount, "@")[0]) // Payee name
-	query.Add("tr", txn.ID)                           // Transaction reference ID
-	query.Add("tn", txn.Category)                     // Transaction note
-	query.Add("am", fmt.Sprintf("%.2f", txn.Amount))  // amount
-	query.Add("cu", "INR")                            // currency
-	query.Add("url", "www.github.com/RoundUpX")       // URL. additional details
+	query.Add("pa", toAccount)                       // Payee address
+	query.Add("pn", "RoundUp")                       // Payee name
+	query.Add("tr", txn.ID)                          // Transaction reference ID
+	query.Add("tn", txn.Category)                    // Transaction note
+	query.Add("am", fmt.Sprintf("%.2f", txn.Amount)) // amount
+	query.Add("cu", "INR")                           // currency
+	query.Add("url", "www.github.com/RoundUpX")      // URL. additional details
 
 	upiURI.RawQuery = query.Encode()
 
