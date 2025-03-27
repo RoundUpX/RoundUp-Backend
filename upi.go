@@ -27,3 +27,18 @@ func (d *DummyUPIClient) GenerateUPIURI(txn Transaction, toAccount string, amoun
 
 	return upiURI.String(), nil
 }
+
+func (s *TransactionService) generateUPIURIs(transaction Transaction) (string, string, error) {
+
+	merchantURI, err := s.upiClient.GenerateUPIURI(transaction, transaction.Merchant, transaction.Amount)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate UPI URI for merchant: %v", err)
+	}
+
+	roundUpURI, err := s.upiClient.GenerateUPIURI(transaction, roundUpAccount, transaction.Roundup)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to generate UPI URI for RoundUp: %v", err)
+	}
+
+	return merchantURI, roundUpURI, nil
+}

@@ -15,8 +15,8 @@ import (
 // Handlers
 func loginHandler(c *gin.Context) {
 	var req struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email    string `json:"email" binding:"required"`
+		Password string `json:"password" binding:"required"`
 	}
 
 	err := c.BindJSON(&req)
@@ -55,9 +55,9 @@ func loginHandler(c *gin.Context) {
 
 func registerHandler(c *gin.Context) {
 	var req struct {
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Name     string `json:"name" binding:"required"`
+		Email    string `json:"email" binding:"required"`
+		Password string `json:"password" binding:"required"`
 	}
 
 	err := c.BindJSON(&req)
@@ -308,9 +308,9 @@ func addGoalHandler(c *gin.Context) {
 	}
 
 	var req struct {
-		GoalName   string  `json:"name"`
-		GoalAmount float64 `json:"amount"`
-		TargetDate string  `json:"date"`
+		GoalName   string  `json:"name" binding:"required"`
+		GoalAmount float64 `json:"amount" binding:"required"`
+		TargetDate string  `json:"date" binding:"required"`
 	}
 
 	err := c.BindJSON(&req)
@@ -352,6 +352,7 @@ func addGoalHandler(c *gin.Context) {
 }
 
 func changeGoalHandler(c *gin.Context) {
+	// Retrieve the userID from the context
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
@@ -364,39 +365,45 @@ func changeGoalHandler(c *gin.Context) {
 		return
 	}
 
+	// Define the request payload with required fields
 	var req struct {
-		GoalName   string  `json:"goal_name"`
-		GoalAmount float64 `json:"goal_amount"`
-		TargetDate string  `json:"target_date"`
+		GoalName   string  `json:"name" binding:"required"`
+		GoalAmount float64 `json:"amount" binding:"required"`
+		TargetDate string  `json:"date" binding:"required"`
 	}
 
-	err := c.BindJSON(&req)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+	// Bind and validate the JSON payload
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input: " + err.Error()})
 		return
 	}
 
+	// Parse the target date ensuring the format is YYYY-MM-DD
 	targetDate, err := time.Parse("2006-01-02", req.TargetDate)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Use YYYY-MM-DD"})
 		return
 	}
 
+	// Find the user by ID
 	user, err := txnService.userRepo.FindByID(uid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
 		return
 	}
 
+	// Check if a goal is already set (business logic)
 	if user.Preferences.GoalAmount == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No goal set. Use addGoalHandler to create one."})
 		return
 	}
 
+	// Update user preferences with the new goal data
 	user.Preferences.GoalName = req.GoalName
 	user.Preferences.GoalAmount = req.GoalAmount
 	user.Preferences.TargetDate = targetDate
 
+	// Persist the updated user record
 	err = txnService.userRepo.Update(user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update goal"})

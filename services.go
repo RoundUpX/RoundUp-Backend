@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -9,73 +10,59 @@ import (
 
 // Business logic functions
 func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) (string, string, error) {
-	// find the user in userRepo to get their preferences
+	// Debug: Start of ProcessRoundup
+	log.Println("Starting ProcessRoundup for user:", userID)
+	log.Printf("Transaction Details: ID=%s, Amount=%.2f, Category=%s\n", transaction.ID, transaction.Amount, transaction.Category)
+
+	// Find the user in userRepo to get their preferences
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
+		log.Printf("Error finding user: %v\n", err)
 		return "", "", fmt.Errorf("User not found: %v", err)
 	}
 
+	// Debug: User Preferences
+	log.Printf("User Preferences: %+v\n", user.Preferences)
+
+	// Validate goal details
 	if user.Preferences.GoalAmount == 0 || user.Preferences.TargetDate.IsZero() || user.Preferences.TargetDate.Before(time.Now()) {
-		// FIXME
-		fmt.Println("No goal amount. considering base roundup")
-
-		// If user has no goal, just save the base amount
-		Roundup := slabBasedRoundup(transaction.Amount*(1+BaseRoundupPercent)) - transaction.Amount
-		Roundup = math.Max(0, Roundup)
-		transaction.Roundup = Roundup
-
-		user.Preferences.RoundupHistory = append(user.Preferences.RoundupHistory, Roundup)
-		user.Preferences.RoundupDates = append(user.Preferences.RoundupDates, time.Now())
-
-		// add to the transaction repo
-		if err := s.repo.SaveTransaction(transaction); err != nil {
-			return "", "", fmt.Errorf("failed to update transaction: %v", err)
-		}
-
-		// update user pref
-		user.Preferences.CurrentSavings += Roundup
-		user.Preferences.RoundupHistory = append(user.Preferences.RoundupHistory, Roundup)
-		user.Preferences.RoundupDates = append(user.Preferences.RoundupDates, time.Now())
-
-		// Save pref to user repo
-		if err := s.userRepo.UpdatePreferences(userID, user.Preferences); err != nil {
-			return "", "", fmt.Errorf("failed to update user preferences: %v", err)
-		}
-
-		// UPI Part
-		merchantURI, err := s.upiClient.GenerateUPIURI(transaction, transaction.Merchant, transaction.Amount)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to generate UPI URI for merchant: %v", err)
-		}
-
-		roundupURI, err := s.upiClient.GenerateUPIURI(transaction, roundUpAccount, transaction.Amount)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to generate UPI URI for RoundUp: %v", err)
-		}
-
-		return merchantURI, roundupURI, nil
+		log.Println("No valid goal. Falling back to base roundup.")
+		return s.processBaseRoundup(userID, transaction)
 	}
 
-	// if the transaction category is not present in the users pref category, return nill
+	// Check if transaction category matches user preferences
 	if len(user.Preferences.RoundupCategories) > 0 && !contains(user.Preferences.RoundupCategories, transaction.Category) {
+		log.Printf("Transaction category '%s' does not match user preferences. Skipping.\n", transaction.Category)
 		return "", "", nil
 	}
 
-	rawBaseRoundup := slabBasedRoundup(transaction.Amount*(1+BaseRoundupPercent)) - transaction.Amount
+	// Calculate raw base roundup
+	rawBaseRoundup := (transaction.Amount * (1 + BaseRoundupPercent)) - transaction.Amount
 	baseRoundup := math.Max(rawBaseRoundup, 0)
 
+	// Debug: Base Roundup Calculation
+	log.Printf("Raw Base Roundup: %.2f\n", rawBaseRoundup)
+	log.Printf("Base Roundup (after max): %.2f\n", baseRoundup)
+
+	// Calculate days remaining until the target date
 	daysRemaining := math.Floor(time.Until(user.Preferences.TargetDate).Hours() / 24)
-	// minimum 1 day
-	daysRemaining = math.Max(1, daysRemaining)
+	daysRemaining = math.Max(1, daysRemaining) // Ensure minimum of 1 day
 
+	// Debug: Days Remaining
+	log.Printf("Days Remaining until target date: %.0f\n", daysRemaining)
+
+	averageRoundup := math.Max(user.Preferences.AverageRoundup, 10) // Fallback to ₹10 if zero
 	remainingAmount := user.Preferences.GoalAmount - user.Preferences.CurrentSavings
-	requiredTxns := math.Floor(remainingAmount / user.Preferences.AverageRoundup)
 
-	// define the period for recent transactions
+	requiredTxns := math.Floor(remainingAmount / averageRoundup)
+
+	// Debug: Goal Calculation
+	log.Printf("Remaining Amount to reach goal: %.2f\n", remainingAmount)
+	log.Printf("Required Transactions to reach goal: %.0f\n", requiredTxns)
+
 	recentPeriod := RecentPeriodDays * 24 * time.Hour
 	cutoff := time.Now().Add(-recentPeriod)
 
-	// filter transactions to only include those within the last week
 	recentDates := []time.Time{}
 	for _, txnDate := range user.Preferences.RoundupDates {
 		if txnDate.After(cutoff) {
@@ -83,84 +70,60 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 		}
 	}
 
-	// Calculate the average transactions per day over the recent period
 	var avgTxnsPerDay float64
 	if len(recentDates) > 0 {
 		avgTxnsPerDay = float64(len(recentDates)) / RecentPeriodDays
 	} else {
-		avgTxnsPerDay = DefaultAvgTxnsPerDay
+		avgTxnsPerDay = DefaultAvgTxnsPerDay // Use default if no recent transactions exist
 	}
 
-	// Calculate how many txns we think will happen until GoalDate
 	projectedTxns := avgTxnsPerDay * daysRemaining
 
-	// pressure must be adjusted on the basis of time left, proj txns and stuff
-	pressure := 1.0
-	if requiredTxns > 0 && projectedTxns > 0 {
-		pressure = requiredTxns / projectedTxns
-	}
+	// Debug: Transaction History and Projections
+	log.Printf("Recent Transactions Count: %d\n", len(recentDates))
+	log.Printf("Average Transactions Per Day: %.2f\n", avgTxnsPerDay)
+	log.Printf("Projected Transactions until target date: %.2f\n", projectedTxns)
 
-	// clip pressure
-	pressure = math.Min(math.Max(pressure, MinPressure), MaxPressure)
+	var pressure float64 = MinPressure // Default minimum pressure
+	if requiredTxns > 0 && projectedTxns > 0 {
+		pressure = math.Max(requiredTxns/projectedTxns, MinPressure)
+	}
+	pressure = math.Min(pressure, MaxPressure)
 
 	Roundup := baseRoundup * pressure
 
-	transaction.Roundup = Roundup // roundup to 2 digits
+	// Debug: Pressure and Final Roundup Calculation
+	log.Printf("Pressure Factor: %.2f\n", pressure)
+	log.Printf("Final Roundup Amount: %.2f\n", Roundup)
 
-	// add to the transaction repo
-	if err := s.repo.SaveTransaction(transaction); err != nil {
-		return "", "", fmt.Errorf("failed to update transaction: %v", err)
+	if Roundup < 0.5 { // Lower threshold for skipping roundups
+		log.Printf("Calculated roundup %.2f is below threshold. Skipping.\n", Roundup)
+		return "", "", nil
 	}
 
-	// update user pref
-	user.Preferences.CurrentSavings += Roundup
-	user.Preferences.RoundupHistory = append(user.Preferences.RoundupHistory, Roundup)
-	user.Preferences.RoundupDates = append(user.Preferences.RoundupDates, time.Now())
+	transaction.Roundup = Roundup
 
-	// Save pref to user repo
-	if err := s.userRepo.UpdatePreferences(userID, user.Preferences); err != nil {
-		return "", "", fmt.Errorf("failed to update user preferences: %v", err)
-	}
-
-	// UPI Part
-	merchantURI, err := s.upiClient.GenerateUPIURI(transaction, transaction.Merchant, transaction.Amount)
+	err = s.saveTransactionAndPreferences(userID, transaction, Roundup)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to generate UPI URI for merchant: %v", err)
+		log.Printf("Error saving transaction and preferences: %v\n", err)
+		return "", "", err
 	}
 
-	roundupURI, err := s.upiClient.GenerateUPIURI(transaction, roundUpAccount, transaction.Amount)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to generate UPI URI for RoundUp: %v", err)
-	}
-
-	return merchantURI, roundupURI, nil
+	return s.generateUPIURIs(transaction)
 }
 
-func slabBasedRoundup(amount float64) float64 {
-	// TODO
-	// Maximum extra amount user wouldn't mind paying (8% of the transaction amount)
-	maxRoundup := 0.08 * amount
+func (s *TransactionService) processBaseRoundup(userID string, transaction Transaction) (string, string, error) {
+	Roundup := (transaction.Amount * (1 + BaseRoundupPercent)) - transaction.Amount
+	Roundup = math.Max(0, Roundup)
 
-	// Define possible increments (in descending order to try larger roundups first)
-	units := []float64{100, 50, 10, 5, 1}
+	transaction.Roundup = Roundup
 
-	var bestRoundup float64 = 0
-
-	for _, unit := range units {
-		// Calculate the roundup if we round up to the next multiple of unit
-		candidate := math.Ceil(amount/unit)*unit - amount
-		// Choose the candidate if it is within the acceptable threshold and is larger than what we had before
-		if candidate <= maxRoundup && candidate > bestRoundup {
-			bestRoundup = candidate
-		}
+	err := s.saveTransactionAndPreferences(userID, transaction, Roundup)
+	if err != nil {
+		return "", "", err
 	}
 
-	// Fallback: if none of the units produce a roundup within the threshold, round up to the nearest whole number.
-	if bestRoundup == 0 {
-		bestRoundup = math.Ceil(amount) - amount
-	}
-
-	return bestRoundup
+	return s.generateUPIURIs(transaction)
 }
 
 func contains(categories []string, target string) bool {
@@ -170,4 +133,28 @@ func contains(categories []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func (s *TransactionService) saveTransactionAndPreferences(userID string, transaction Transaction, roundup float64) error {
+	transaction.CreatedAt = time.Now()
+	err := s.repo.SaveTransaction(transaction)
+	if err != nil {
+		return fmt.Errorf("failed to save transaction: %v", err)
+	}
+
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return fmt.Errorf("failed to retrieve user: %v", err)
+	}
+
+	user.Preferences.CurrentSavings += roundup
+	user.Preferences.RoundupHistory = append(user.Preferences.RoundupHistory, roundup)
+	user.Preferences.RoundupDates = append(user.Preferences.RoundupDates, time.Now())
+
+	err = s.userRepo.UpdatePreferences(userID, user.Preferences)
+	if err != nil {
+		return fmt.Errorf("failed to update user preferences: %v", err)
+	}
+
+	return nil
 }
