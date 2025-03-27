@@ -1,0 +1,30 @@
+version: "3.8"
+services:
+  app:
+    build: .
+    ports:
+      - "8082:8082"
+    environment:
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=roundup_user
+      - DB_PASSWORD=roundup123
+      - DB_NAME=roundup
+      - JWT_SECRET=your_jwt_secret_here
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: roundup_user
+      POSTGRES_PASSWORD: roundup123
+      POSTGRES_DB: roundup
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
