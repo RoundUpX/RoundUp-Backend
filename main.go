@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -74,13 +75,14 @@ type TransactionRepository interface {
 type UserRepository interface {
 	FindByID(id string) (*User, error)
 	Update(user *User) error
+	CreateUserPreferences(userID string, prefs UserPreferences) error
 	UpdatePreferences(userID string, prefs UserPreferences) error
 	CreateUser(user *User) error
 	GetUserByEmail(email string) (*User, error)
 }
 
 type UPIClient interface {
-	GenerateUPIURI(fromUserID, toAccount string, amount float64) (string, error)
+	GenerateUPIURI(txn Transaction, toAccount string, amount float64) (string, error)
 }
 
 // Global variable
@@ -110,7 +112,6 @@ func main() {
 	// public routes
 	router.POST("/api/v1/auth/register", registerHandler)
 	router.POST("/api/v1/auth/login", loginHandler)
-	router.POST("/api/v1/auth/forgot", forgotPasswordHandler)
 
 	// protected routes
 	authorized := router.Group("/api/v1")
@@ -122,6 +123,7 @@ func main() {
 
 		authorized.GET("/preferences", getPreferencesHandler)
 		authorized.PUT("/preferences", updatePreferencesHandler)
+
 		authorized.POST("/preferences/goal", addGoalHandler)
 		authorized.PUT("/preferences/goal", changeGoalHandler)
 	}
@@ -223,7 +225,7 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 	// Fetch user preferences separately
 	query = "SELECT roundup_categories, goal_amount, target_date, current_savings, average_roundup FROM user_preferences WHERE user_id = $1"
 	err = r.db.QueryRow(query, id).Scan(
-		&user.Preferences.RoundupCategories,
+		pq.Array(&user.Preferences.RoundupCategories),
 		&user.Preferences.GoalAmount,
 		&user.Preferences.TargetDate,
 		&user.Preferences.CurrentSavings,
@@ -236,15 +238,33 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 	return &user, nil
 }
 
+func (r *PostgresUserRepository) CreateUserPreferences(userID string, prefs UserPreferences) error {
+	query := `
+		INSERT INTO user_preferences
+		(user_id, roundup_categories, goal_amount, target_date, current_savings, average_roundup, roundup_history, roundup_dates)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`
+	_, err := r.db.Exec(query,
+		userID,
+		pq.Array(prefs.RoundupCategories),
+		prefs.GoalAmount,
+		prefs.TargetDate,
+		prefs.CurrentSavings,
+		prefs.AverageRoundup,
+		pq.Array(prefs.RoundupHistory),
+		pq.Array(prefs.RoundupDates),
+	)
+	return err
+}
+
 func (r *PostgresUserRepository) UpdatePreferences(userID string, prefs UserPreferences) error {
 
 	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5 WHERE user_id = $6"
-	_, err := r.db.Exec(query, prefs.RoundupCategories, prefs.GoalAmount, prefs.TargetDate, prefs.CurrentSavings, prefs.AverageRoundup, userID)
+	_, err := r.db.Exec(query, pq.Array(prefs.RoundupCategories), prefs.GoalAmount, prefs.TargetDate, prefs.CurrentSavings, prefs.AverageRoundup, userID)
 	fmt.Println(err)
 	return err
 }
 
-// Add this method to your PostgresUserRepository struct
 func (r *PostgresUserRepository) Update(user *User) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -441,6 +461,23 @@ func registerHandler(c *gin.Context) {
 		return
 	}
 
+	// Insert default pref for the new user
+	defaultPrefs := UserPreferences{
+		RoundupCategories: []string{},
+		GoalAmount:        0,
+		TargetDate:        time.Now(),
+		CurrentSavings:    0,
+		AverageRoundup:    0,
+		RoundupHistory:    []float64{},
+		RoundupDates:      []time.Time{},
+	}
+
+	err = txnService.userRepo.CreateUserPreferences(newUser.ID, defaultPrefs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user preferences"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
@@ -546,6 +583,63 @@ func getTransactionByIDHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, tx)
 }
 
+func getPreferencesHandler(c *gin.Context) {
+
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	user, err := txnService.userRepo.FindByID(uid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve user preferences"})
+		return
+	}
+
+	c.JSON(http.StatusOK, user.Preferences)
+}
+
+func updatePreferencesHandler(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	var newPrefs UserPreferences
+	err := c.BindJSON(&newPrefs)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+	}
+
+	err = txnService.userRepo.UpdatePreferences(uid, newPrefs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user preferences"})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User preferences updates successfully"})
+}
+
+func addGoalHandler(c *gin.Context) {
+	// TODO
+}
+func changeGoalHandler(c *gin.Context) {
+	// TODO
+}
+
 // Business logic functions
 func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) (string, string, error) {
 
@@ -556,7 +650,7 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 	}
 
 	// if the transaction category is not present in the users pref category, return nill
-	if !contains(user.Preferences.RoundupCategories, transaction.Category) {
+	if len(user.Preferences.RoundupCategories) > 0 && !contains(user.Preferences.RoundupCategories, transaction.Category) {
 		return "", "", nil
 	}
 
@@ -603,7 +697,7 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	Roundup := baseRoundup * pressure
 
-	transaction.Roundup = Roundup
+	transaction.Roundup = math.Round(Roundup*100) / 100 // roundup to 2 digits
 
 	// add to the transaction repo
 	if err := s.repo.SaveTransaction(transaction); err != nil {
@@ -622,12 +716,12 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	// UPI Part
 
-	merchantURI, err := s.upiClient.GenerateUPIURI(userID, transaction.Merchant, transaction.Amount)
+	merchantURI, err := s.upiClient.GenerateUPIURI(transaction, transaction.Merchant, transaction.Amount)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to generate UPI URI for merchant: %v", err)
 	}
 
-	roundupURI, err := s.upiClient.GenerateUPIURI(userID, roundUpAccount, transaction.Amount)
+	roundupURI, err := s.upiClient.GenerateUPIURI(transaction, roundUpAccount, transaction.Amount)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to generate UPI URI for RoundUp: %v", err)
 	}
@@ -660,8 +754,23 @@ func contains(categories []string, target string) bool {
 // DummyUPIClient implementation
 type DummyUPIClient struct{}
 
-func (d *DummyUPIClient) GenerateUPIURI(fromUserID, toAccount string, amount float64) (string, error) {
+func (d *DummyUPIClient) GenerateUPIURI(txn Transaction, toAccount string, amount float64) (string, error) {
 
-	upiURI := fmt.Sprintf("upi://pay?pa=%s&pn=%s&am=%.2f&cu=INR", toAccount, fromUserID, amount)
-	return upiURI, nil
+	upiURI := url.URL{
+		Scheme: "upi",
+		Host:   "pay",
+	}
+
+	query := url.Values{}
+	query.Add("pa", toAccount)                        // Payee address
+	query.Add("pn", strings.Split(toAccount, "@")[0]) // Payee name
+	query.Add("tr", txn.ID)                           // Transaction reference ID
+	query.Add("tn", txn.Category)                     // Transaction note
+	query.Add("am", fmt.Sprintf("%.2f", txn.Amount))  // amount
+	query.Add("cu", "INR")                            // currency
+	query.Add("url", "www.github.com/RoundUpX")       // URL. additional details
+
+	upiURI.RawQuery = query.Encode()
+
+	return upiURI.String(), nil
 }
