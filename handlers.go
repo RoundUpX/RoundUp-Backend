@@ -1,3 +1,17 @@
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+)
+
 // Handlers
 func loginHandler(c *gin.Context) {
 	var req struct {
@@ -99,7 +113,6 @@ func registerHandler(c *gin.Context) {
 }
 
 func getTransactionsHandler(c *gin.Context) {
-
 	// get userID from gin Context
 	userID, exists := c.Get("userID")
 	if !exists {
@@ -125,7 +138,6 @@ func getTransactionsHandler(c *gin.Context) {
 }
 
 func addTransactionHandler(c *gin.Context) {
-
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
@@ -166,7 +178,6 @@ func addTransactionHandler(c *gin.Context) {
 }
 
 func getTransactionByIDHandler(c *gin.Context) {
-
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
@@ -201,7 +212,6 @@ func getTransactionByIDHandler(c *gin.Context) {
 }
 
 func getPreferencesHandler(c *gin.Context) {
-
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
@@ -285,7 +295,6 @@ func getGoalHandler(c *gin.Context) {
 }
 
 func addGoalHandler(c *gin.Context) {
-
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
@@ -341,8 +350,8 @@ func addGoalHandler(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Goal added successfully"})
 }
-func changeGoalHandler(c *gin.Context) {
 
+func changeGoalHandler(c *gin.Context) {
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
