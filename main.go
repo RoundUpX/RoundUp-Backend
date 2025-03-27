@@ -164,6 +164,7 @@ func validateToken(tokenString string) (*CustomClaims, error) {
 		})
 
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 
@@ -398,6 +399,7 @@ func connectDB() (*sql.DB, error) {
 	db, err := sql.Open("postgres", connStr)
 
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 
@@ -417,6 +419,7 @@ func (r *PostgresTransactionRepository) SaveTransaction(tx Transaction) error {
 
 	query := "INSERT INTO transactions (id, user_id, amount, category, roundup, created_at, merchant) VALUES ($1, $2, $3, $4, $5, $6, $7)"
 	_, err := r.db.Exec(query, tx.ID, tx.UserID, tx.Amount, tx.Category, tx.Roundup, tx.CreatedAt, tx.Merchant)
+	fmt.Println(err)
 	return err
 }
 
@@ -426,6 +429,7 @@ func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) (
 	rows, err := r.db.Query(query, userID)
 
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 
@@ -437,6 +441,7 @@ func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) (
 		err := rows.Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
 
 		if err != nil {
+			fmt.Println(err)
 			return nil, err
 		}
 
@@ -453,6 +458,7 @@ func (r *PostgresTransactionRepository) GetTransactionByID(id string) (*Transact
 	err := r.db.QueryRow(query, id).Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
 
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 
@@ -471,6 +477,7 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
 
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 
@@ -484,6 +491,7 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 		&user.Preferences.AverageRoundup,
 	)
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 	return &user, nil
@@ -493,6 +501,7 @@ func (r *PostgresUserRepository) UpdatePreferences(userID string, prefs UserPref
 
 	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5 WHERE user_id = $6"
 	_, err := r.db.Exec(query, prefs.RoundupCategories, prefs.GoalAmount, prefs.TargetDate, prefs.CurrentSavings, prefs.AverageRoundup, userID)
+	fmt.Println(err)
 	return err
 }
 
@@ -500,6 +509,7 @@ func (r *PostgresUserRepository) UpdatePreferences(userID string, prefs UserPref
 func (r *PostgresUserRepository) Update(user *User) error {
 	tx, err := r.db.Begin()
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 
@@ -508,6 +518,7 @@ func (r *PostgresUserRepository) Update(user *User) error {
 		user.Name, user.Email, user.ID)
 	if err != nil {
 		tx.Rollback()
+		fmt.Println(err)
 		return err
 	}
 
@@ -515,6 +526,7 @@ func (r *PostgresUserRepository) Update(user *User) error {
 	err = r.updatePreferencesInTx(tx, user.ID, user.Preferences)
 	if err != nil {
 		tx.Rollback()
+		fmt.Println(err)
 		return err
 	}
 
@@ -535,12 +547,14 @@ func (r *PostgresUserRepository) updatePreferencesInTx(tx *sql.Tx, userID string
 		pq.Array(prefs.RoundupHistory),
 		pq.Array(prefs.RoundupDates),
 		userID)
+	fmt.Println(err)
 	return err
 }
 
 func (r *PostgresUserRepository) CreateUser(user *User) error {
 	query := "INSERT INTO users (id, name, email, password, created_at) VALUES ($1, $2, $3, $4, $5)"
 	_, err := r.db.Exec(query, user.ID, user.Name, user.Email, user.Password, user.CreatedAt)
+	fmt.Println(err)
 	return err
 }
 
@@ -549,6 +563,7 @@ func (r *PostgresUserRepository) GetUserByEmail(email string) (*User, error) {
 	query := "SELECT id, name, email, password, created_at FROM users WHERE email = $1"
 	err := r.db.QueryRow(query, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.CreatedAt)
 	if err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 	return &user, nil
