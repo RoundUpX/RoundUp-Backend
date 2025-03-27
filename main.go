@@ -634,10 +634,111 @@ func updatePreferencesHandler(c *gin.Context) {
 }
 
 func addGoalHandler(c *gin.Context) {
-	// TODO
+
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	var req struct {
+		GoalAmount float64 `json:"goal_amount"`
+		TargetDate string  `json:"target_date"`
+	}
+
+	err := c.BindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	targetDate, err := time.Parse("2006-10-17", req.TargetDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Use YYYY-MM-DD"})
+		return
+	}
+
+	user, err := txnService.userRepo.FindByID(uid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
+		return
+	}
+
+	// TODO Multiple goals per user?
+	if user.Preferences.GoalAmount > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Goal already exists. Create PUT request to update it"})
+		return
+	}
+
+	user.Preferences.GoalAmount = req.GoalAmount
+	user.Preferences.TargetDate = targetDate
+
+	err = txnService.userRepo.Update(user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to add goal"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Goal added successfully"})
 }
 func changeGoalHandler(c *gin.Context) {
-	// TODO
+
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	var req struct {
+		GoalAmount float64 `json:"goal_amount"`
+		TargetDate string  `json:"target_date"`
+	}
+
+	err := c.BindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	targetDate, err := time.Parse("2006-10-17", req.TargetDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Use YYYY-MM-DD"})
+		return
+	}
+
+	user, err := txnService.userRepo.FindByID(uid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
+		return
+	}
+
+	if user.Preferences.GoalAmount == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No goal set. Use addGoalHandler to create one."})
+		return
+	}
+
+	user.Preferences.GoalAmount = req.GoalAmount
+	user.Preferences.TargetDate = targetDate
+
+	err = txnService.userRepo.Update(user)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update goal"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Goal updated successfully"})
 }
 
 // Business logic functions
