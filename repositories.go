@@ -113,9 +113,28 @@ func (r *PostgresUserRepository) CreateUserPreferences(userID string, prefs User
 }
 
 func (r *PostgresUserRepository) UpdatePreferences(userID string, prefs UserPreferences) error {
-	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5 WHERE user_id = $6"
-	_, err := r.db.Exec(query, pq.Array(prefs.RoundupCategories), prefs.GoalAmount, prefs.TargetDate, prefs.CurrentSavings, prefs.AverageRoundup, userID)
-	fmt.Println(err)
+	query := `
+    UPDATE user_preferences
+    SET
+        roundup_categories = $1,
+        goal_amount = $2,
+        target_date = $3,
+        current_savings = $4,
+        average_roundup = $5,
+        roundup_history = $6,
+        roundup_dates = $7
+    WHERE user_id = $8
+    `
+	_, err := r.db.Exec(query,
+		pq.Array(prefs.RoundupCategories),
+		prefs.GoalAmount,
+		prefs.TargetDate,
+		prefs.CurrentSavings,
+		prefs.AverageRoundup,
+		pq.Array(prefs.RoundupHistory),
+		pq.Array(prefs.RoundupDates),
+		userID,
+	)
 	return err
 }
 

@@ -161,11 +161,13 @@ func addTransactionHandler(c *gin.Context) {
 	txn.ID = uuid.New().String()
 	txn.CreatedAt = time.Now()
 
-	merchantURI, roundupURI, err := txnService.ProcessRoundup(uid, txn)
+	roundup, merchantURI, roundupURI, err := txnService.ProcessRoundup(uid, txn)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	txn.Roundup = roundup
 
 	response := gin.H{
 		"message":      "Transaction added successfully",
@@ -321,7 +323,6 @@ func addGoalHandler(c *gin.Context) {
 
 	targetDate, err := time.Parse("2006-01-02", req.TargetDate)
 	if err != nil {
-		fmt.Println("Received TargetDate:", req.TargetDate)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Use YYYY-MM-DD"})
 		return
 	}
