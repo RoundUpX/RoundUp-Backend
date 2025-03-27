@@ -83,8 +83,10 @@ type UPIClient interface {
 	GenerateUPIURI(fromUserID, toAccount string, amount float64) (string, error)
 }
 
+// Global variable
 var txnService *TransactionService
 
+// main function
 func main() {
 
 	db, err := connectDB()
@@ -108,6 +110,8 @@ func main() {
 	// public routes
 	router.POST("/api/v1/auth/register", registerHandler)
 	router.POST("/api/v1/auth/login", loginHandler)
+	router.POST("/api/v1/auth/forgot", forgotPasswordHandler)
+
 	// protected routes
 	authorized := router.Group("/api/v1")
 	authorized.Use(authMiddleware())
@@ -115,14 +119,201 @@ func main() {
 		authorized.GET("/transactions", getTransactionsHandler)
 		authorized.POST("/transaction", addTransactionHandler)
 		authorized.GET("/transactions/:id", getTransactionByIDHandler)
-		// authorized.POST("/connect-upi", connectUPIHandler)
-		// TODO: UPI
+
+		authorized.GET("/preferences", getPreferencesHandler)
+		authorized.PUT("/preferences", updatePreferencesHandler)
+		authorized.POST("/preferences/goal", addGoalHandler)
+		authorized.PUT("/preferences/goal", changeGoalHandler)
 	}
 
 	router.Run(":8082")
 }
 
-// returns a gin middleware function for each request
+// Database connection
+func connectDB() (*sql.DB, error) {
+	connStr := "user=roundup_user password=roundup123 dbname=roundup sslmode=disable"
+	db, err := sql.Open("postgres", connStr)
+
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+
+	err = db.Ping()
+	if err != nil {
+		fmt.Println(err)
+		log.Fatal(err)
+	}
+
+	return db, nil
+}
+
+// PostgresTransactionRepository and its methods
+type PostgresTransactionRepository struct {
+	db *sql.DB
+}
+
+func (r *PostgresTransactionRepository) SaveTransaction(tx Transaction) error {
+
+	query := "INSERT INTO transactions (id, user_id, amount, category, roundup, created_at, merchant) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+	_, err := r.db.Exec(query, tx.ID, tx.UserID, tx.Amount, tx.Category, tx.Roundup, tx.CreatedAt, tx.Merchant)
+	fmt.Println(err)
+	return err
+}
+
+func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) ([]Transaction, error) {
+
+	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant FROM transactions WHERE user_id = $1"
+	rows, err := r.db.Query(query, userID)
+
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var transactions []Transaction
+	for rows.Next() {
+		var tx Transaction
+		err := rows.Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
+
+		if err != nil {
+			fmt.Println(err)
+			return nil, err
+		}
+
+		transactions = append(transactions, tx)
+	}
+
+	return transactions, nil
+}
+
+func (r *PostgresTransactionRepository) GetTransactionByID(id string) (*Transaction, error) {
+	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant FROM transactions WHERE id = $1"
+
+	var tx Transaction
+	err := r.db.QueryRow(query, id).Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
+
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+
+	return &tx, nil
+}
+
+// PostgresUserRepository and its methods
+type PostgresUserRepository struct {
+	db *sql.DB
+}
+
+func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
+
+	var user User
+	query := "SELECT id, name, email, created_at FROM users WHERE id = $1"
+
+	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
+
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+
+	// Fetch user preferences separately
+	query = "SELECT roundup_categories, goal_amount, target_date, current_savings, average_roundup FROM user_preferences WHERE user_id = $1"
+	err = r.db.QueryRow(query, id).Scan(
+		&user.Preferences.RoundupCategories,
+		&user.Preferences.GoalAmount,
+		&user.Preferences.TargetDate,
+		&user.Preferences.CurrentSavings,
+		&user.Preferences.AverageRoundup,
+	)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *PostgresUserRepository) UpdatePreferences(userID string, prefs UserPreferences) error {
+
+	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5 WHERE user_id = $6"
+	_, err := r.db.Exec(query, prefs.RoundupCategories, prefs.GoalAmount, prefs.TargetDate, prefs.CurrentSavings, prefs.AverageRoundup, userID)
+	fmt.Println(err)
+	return err
+}
+
+// Add this method to your PostgresUserRepository struct
+func (r *PostgresUserRepository) Update(user *User) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		fmt.Println(err)
+		return err
+	}
+
+	// Update basic user info
+	_, err = tx.Exec("UPDATE users SET name = $1, email = $2 WHERE id = $3",
+		user.Name, user.Email, user.ID)
+	if err != nil {
+		tx.Rollback()
+		fmt.Println(err)
+		return err
+	}
+
+	// Update user preferences
+	err = r.updatePreferencesInTx(tx, user.ID, user.Preferences)
+	if err != nil {
+		tx.Rollback()
+		fmt.Println(err)
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// Helper method for transaction-based preference updates
+func (r *PostgresUserRepository) updatePreferencesInTx(tx *sql.Tx, userID string, prefs UserPreferences) error {
+
+	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5, roundup_history = $6, roundup_dates = $7 WHERE user_id = $8"
+
+	_, err := tx.Exec(query,
+		pq.Array(prefs.RoundupCategories),
+		prefs.GoalAmount,
+		prefs.TargetDate,
+		prefs.CurrentSavings,
+		prefs.AverageRoundup,
+		pq.Array(prefs.RoundupHistory),
+		pq.Array(prefs.RoundupDates),
+		userID)
+	fmt.Println(err)
+	return err
+}
+
+func (r *PostgresUserRepository) CreateUser(user *User) error {
+	query := "INSERT INTO users (id, name, email, password, created_at) VALUES ($1, $2, $3, $4, $5)"
+	_, err := r.db.Exec(query, user.ID, user.Name, user.Email, user.Password, user.CreatedAt)
+	fmt.Println(err)
+	return err
+}
+
+func (r *PostgresUserRepository) GetUserByEmail(email string) (*User, error) {
+	var user User
+	query := "SELECT id, name, email, password, created_at FROM users WHERE email = $1"
+	err := r.db.QueryRow(query, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.CreatedAt)
+	if err != nil {
+		fmt.Println(err)
+		return nil, err
+	}
+	return &user, nil
+}
+
+// Authentication and middleware
+type CustomClaims struct {
+	jwt.RegisteredClaims
+	UserID string `json:"user_id"`
+}
+
 func authMiddleware() gin.HandlerFunc {
 	// gin.Context is basically a global variable shared by all the handlers and middleware
 	return func(c *gin.Context) {
@@ -151,11 +342,6 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-type CustomClaims struct {
-	jwt.RegisteredClaims
-	UserID string `json:"user_id"`
-}
-
 func validateToken(tokenString string) (*CustomClaims, error) {
 	// Parse the token with CustomClaims
 	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{},
@@ -176,6 +362,7 @@ func validateToken(tokenString string) (*CustomClaims, error) {
 	return nil, errors.New("invalid token claims")
 }
 
+// Handlers
 func loginHandler(c *gin.Context) {
 	var req struct {
 		Email    string `json:"email"`
@@ -257,6 +444,109 @@ func registerHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
+func getTransactionsHandler(c *gin.Context) {
+
+	// get userID from gin Context
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "userID not found"})
+		return
+	}
+
+	// check if it is of correct format
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid userID type"})
+		return
+	}
+
+	transactions, err := txnService.repo.GetTransactionsByUserID(uid)
+	if err != nil {
+		fmt.Println(err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve transactions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, transactions)
+}
+
+func addTransactionHandler(c *gin.Context) {
+
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid userID format"})
+		return
+	}
+
+	var txn Transaction
+	err := c.BindJSON(&txn)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid transaction input"})
+		return
+	}
+
+	txn.UserID = uid
+	txn.ID = uuid.New().String()
+	txn.CreatedAt = time.Now()
+
+	merchantURI, roundupURI, err := txnService.ProcessRoundup(uid, txn)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	response := gin.H{
+		"message":      "Transaction added successfully",
+		"transaction":  txn,
+		"merchant_uri": merchantURI,
+		"roundup_uri":  roundupURI,
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+func getTransactionByIDHandler(c *gin.Context) {
+
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	// Get the transaction ID from the URL parameter
+	txID := c.Param("id")
+	if txID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Transaction ID is required"})
+		return
+	}
+
+	tx, err := txnService.repo.GetTransactionByID(txID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
+		return
+	}
+
+	if tx.UserID != uid {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	c.JSON(http.StatusOK, tx)
+}
+
+// Business logic functions
 func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) (string, string, error) {
 
 	// find the user in userRepo to get their preferences
@@ -367,284 +657,7 @@ func contains(categories []string, target string) bool {
 	return false
 }
 
-func getTransactionsHandler(c *gin.Context) {
-
-	// get userID from gin Context
-	userID, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "userID not found"})
-		return
-	}
-
-	// check if it is of correct format
-	uid, ok := userID.(string)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid userID type"})
-		return
-	}
-
-	transactions, err := txnService.repo.GetTransactionsByUserID(uid)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve transactions"})
-		return
-	}
-
-	c.JSON(http.StatusOK, transactions)
-}
-
-// Data access layer
-
-func connectDB() (*sql.DB, error) {
-	connStr := "user=roundup_user password=roundup123 dbname=roundup sslmode=disable"
-	db, err := sql.Open("postgres", connStr)
-
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-
-	err = db.Ping()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return db, nil
-}
-
-type PostgresTransactionRepository struct {
-	db *sql.DB
-}
-
-func (r *PostgresTransactionRepository) SaveTransaction(tx Transaction) error {
-
-	query := "INSERT INTO transactions (id, user_id, amount, category, roundup, created_at, merchant) VALUES ($1, $2, $3, $4, $5, $6, $7)"
-	_, err := r.db.Exec(query, tx.ID, tx.UserID, tx.Amount, tx.Category, tx.Roundup, tx.CreatedAt, tx.Merchant)
-	fmt.Println(err)
-	return err
-}
-
-func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) ([]Transaction, error) {
-
-	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant FROM transactions WHERE user_id = $1"
-	rows, err := r.db.Query(query, userID)
-
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-
-	defer rows.Close()
-
-	var transactions []Transaction
-	for rows.Next() {
-		var tx Transaction
-		err := rows.Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
-
-		if err != nil {
-			fmt.Println(err)
-			return nil, err
-		}
-
-		transactions = append(transactions, tx)
-	}
-
-	return transactions, nil
-}
-
-func (r *PostgresTransactionRepository) GetTransactionByID(id string) (*Transaction, error) {
-	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant FROM transactions WHERE id = $1"
-
-	var tx Transaction
-	err := r.db.QueryRow(query, id).Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
-
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-
-	return &tx, nil
-}
-
-type PostgresUserRepository struct {
-	db *sql.DB
-}
-
-func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
-
-	var user User
-	query := "SELECT id, name, email, created_at FROM users WHERE id = $1"
-
-	err := r.db.QueryRow(query, id).Scan(&user.ID, &user.Name, &user.Email, &user.CreatedAt)
-
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-
-	// Fetch user preferences separately
-	query = "SELECT roundup_categories, goal_amount, target_date, current_savings, average_roundup FROM user_preferences WHERE user_id = $1"
-	err = r.db.QueryRow(query, id).Scan(
-		&user.Preferences.RoundupCategories,
-		&user.Preferences.GoalAmount,
-		&user.Preferences.TargetDate,
-		&user.Preferences.CurrentSavings,
-		&user.Preferences.AverageRoundup,
-	)
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-	return &user, nil
-}
-
-func (r *PostgresUserRepository) UpdatePreferences(userID string, prefs UserPreferences) error {
-
-	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5 WHERE user_id = $6"
-	_, err := r.db.Exec(query, prefs.RoundupCategories, prefs.GoalAmount, prefs.TargetDate, prefs.CurrentSavings, prefs.AverageRoundup, userID)
-	fmt.Println(err)
-	return err
-}
-
-// Add this method to your PostgresUserRepository struct
-func (r *PostgresUserRepository) Update(user *User) error {
-	tx, err := r.db.Begin()
-	if err != nil {
-		fmt.Println(err)
-		return err
-	}
-
-	// Update basic user info
-	_, err = tx.Exec("UPDATE users SET name = $1, email = $2 WHERE id = $3",
-		user.Name, user.Email, user.ID)
-	if err != nil {
-		tx.Rollback()
-		fmt.Println(err)
-		return err
-	}
-
-	// Update user preferences
-	err = r.updatePreferencesInTx(tx, user.ID, user.Preferences)
-	if err != nil {
-		tx.Rollback()
-		fmt.Println(err)
-		return err
-	}
-
-	return tx.Commit()
-}
-
-// Helper method for transaction-based preference updates
-func (r *PostgresUserRepository) updatePreferencesInTx(tx *sql.Tx, userID string, prefs UserPreferences) error {
-
-	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5, roundup_history = $6, roundup_dates = $7 WHERE user_id = $8"
-
-	_, err := tx.Exec(query,
-		pq.Array(prefs.RoundupCategories),
-		prefs.GoalAmount,
-		prefs.TargetDate,
-		prefs.CurrentSavings,
-		prefs.AverageRoundup,
-		pq.Array(prefs.RoundupHistory),
-		pq.Array(prefs.RoundupDates),
-		userID)
-	fmt.Println(err)
-	return err
-}
-
-func (r *PostgresUserRepository) CreateUser(user *User) error {
-	query := "INSERT INTO users (id, name, email, password, created_at) VALUES ($1, $2, $3, $4, $5)"
-	_, err := r.db.Exec(query, user.ID, user.Name, user.Email, user.Password, user.CreatedAt)
-	fmt.Println(err)
-	return err
-}
-
-func (r *PostgresUserRepository) GetUserByEmail(email string) (*User, error) {
-	var user User
-	query := "SELECT id, name, email, password, created_at FROM users WHERE email = $1"
-	err := r.db.QueryRow(query, email).Scan(&user.ID, &user.Name, &user.Email, &user.Password, &user.CreatedAt)
-	if err != nil {
-		fmt.Println(err)
-		return nil, err
-	}
-	return &user, nil
-}
-
-func addTransactionHandler(c *gin.Context) {
-
-	userID, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
-		return
-	}
-
-	uid, ok := userID.(string)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid userID format"})
-		return
-	}
-
-	var txn Transaction
-	err := c.BindJSON(&txn)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid transaction input"})
-		return
-	}
-
-	txn.UserID = uid
-	txn.ID = uuid.New().String()
-	txn.CreatedAt = time.Now()
-
-	merchantURI, roundupURI, err := txnService.ProcessRoundup(uid, txn)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	response := gin.H{
-		"message":      "Transaction added successfully",
-		"transaction":  txn,
-		"merchant_uri": merchantURI,
-		"roundup_uri":  roundupURI,
-	}
-
-	c.JSON(http.StatusOK, response)
-}
-
-func getTransactionByIDHandler(c *gin.Context) {
-
-	userID, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
-		return
-	}
-
-	uid, ok := userID.(string)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID format"})
-		return
-	}
-
-	// Get the transaction ID from the URL parameter
-	txID := c.Param("id")
-	if txID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Transaction ID is required"})
-		return
-	}
-
-	tx, err := txnService.repo.GetTransactionByID(txID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Transaction not found"})
-		return
-	}
-
-	if tx.UserID != uid {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
-		return
-	}
-
-	c.JSON(http.StatusOK, tx)
-}
-
+// DummyUPIClient implementation
 type DummyUPIClient struct{}
 
 func (d *DummyUPIClient) GenerateUPIURI(fromUserID, toAccount string, amount float64) (string, error) {
