@@ -42,6 +42,7 @@ type User struct {
 
 type UserPreferences struct {
 	RoundupCategories []string    `json:"roundup_categories"` // things like "food", "clothes", "groceries"
+	GoalName          string      `json:"goal_name"`          // trip
 	GoalAmount        float64     `json:"goal_amount"`        // 5000
 	TargetDate        time.Time   `json:"target_date"`        // 4th May
 	CurrentSavings    float64     `json:"current_savings"`    // amount already saved
@@ -124,6 +125,7 @@ func main() {
 		authorized.GET("/preferences", getPreferencesHandler)
 		authorized.PUT("/preferences", updatePreferencesHandler)
 
+		authorized.GET("/preferences/goal", getGoalHandler)
 		authorized.POST("/preferences/goal", addGoalHandler)
 		authorized.PUT("/preferences/goal", changeGoalHandler)
 	}
@@ -223,9 +225,10 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 	}
 
 	// Fetch user preferences separately
-	query = "SELECT roundup_categories, goal_amount, target_date, current_savings, average_roundup FROM user_preferences WHERE user_id = $1"
+	query = "SELECT roundup_categories, goal_name, goal_amount, target_date, current_savings, average_roundup FROM user_preferences WHERE user_id = $1"
 	err = r.db.QueryRow(query, id).Scan(
 		pq.Array(&user.Preferences.RoundupCategories),
+		&user.Preferences.GoalName,
 		&user.Preferences.GoalAmount,
 		&user.Preferences.TargetDate,
 		&user.Preferences.CurrentSavings,
@@ -282,7 +285,7 @@ func (r *PostgresUserRepository) Update(user *User) error {
 	}
 
 	// Update user preferences
-	err = r.updatePreferencesInTx(tx, user.ID, user.Preferences)
+	err = r.updatePreferences(tx, user.ID, user.Preferences)
 	if err != nil {
 		tx.Rollback()
 		fmt.Println(err)
@@ -292,10 +295,9 @@ func (r *PostgresUserRepository) Update(user *User) error {
 	return tx.Commit()
 }
 
-// Helper method for transaction-based preference updates
-func (r *PostgresUserRepository) updatePreferencesInTx(tx *sql.Tx, userID string, prefs UserPreferences) error {
+func (r *PostgresUserRepository) updatePreferences(tx *sql.Tx, userID string, prefs UserPreferences) error {
 
-	query := "UPDATE user_preferences SET roundup_categories = $1, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5, roundup_history = $6, roundup_dates = $7 WHERE user_id = $8"
+	query := "UPDATE user_preferences SET roundup_categories = $1, goal_name = $9, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5, roundup_history = $6, roundup_dates = $7 WHERE user_id = $8"
 
 	_, err := tx.Exec(query,
 		pq.Array(prefs.RoundupCategories),
@@ -305,7 +307,9 @@ func (r *PostgresUserRepository) updatePreferencesInTx(tx *sql.Tx, userID string
 		prefs.AverageRoundup,
 		pq.Array(prefs.RoundupHistory),
 		pq.Array(prefs.RoundupDates),
-		userID)
+		userID,
+		prefs.GoalName,
+	)
 	fmt.Println(err)
 	return err
 }
@@ -464,8 +468,9 @@ func registerHandler(c *gin.Context) {
 	// Insert default pref for the new user
 	defaultPrefs := UserPreferences{
 		RoundupCategories: []string{},
+		GoalName:          "",
 		GoalAmount:        0,
-		TargetDate:        time.Now(),
+		TargetDate:        time.Time{},
 		CurrentSavings:    0,
 		AverageRoundup:    0,
 		RoundupHistory:    []float64{},
@@ -633,6 +638,40 @@ func updatePreferencesHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User preferences updates successfully"})
 }
 
+func getGoalHandler(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	uid, ok := userID.(string)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid user ID format"})
+		return
+	}
+
+	user, err := txnService.userRepo.FindByID(uid)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
+		return
+	}
+
+	type Goal struct {
+		Name   string    `json:"name"`
+		Amount float64   `json:"amount"`
+		Date   time.Time `json:"date"`
+	}
+
+	var goal Goal
+
+	goal.Amount = user.Preferences.GoalAmount
+	goal.Date = user.Preferences.TargetDate
+	goal.Name = user.Preferences.GoalName
+
+	c.JSON(http.StatusOK, goal)
+}
+
 func addGoalHandler(c *gin.Context) {
 
 	userID, exists := c.Get("userID")
@@ -648,8 +687,9 @@ func addGoalHandler(c *gin.Context) {
 	}
 
 	var req struct {
-		GoalAmount float64 `json:"goal_amount"`
-		TargetDate string  `json:"target_date"`
+		GoalName   string  `json:"name"`
+		GoalAmount float64 `json:"amount"`
+		TargetDate string  `json:"date"`
 	}
 
 	err := c.BindJSON(&req)
@@ -658,8 +698,9 @@ func addGoalHandler(c *gin.Context) {
 		return
 	}
 
-	targetDate, err := time.Parse("2006-10-17", req.TargetDate)
+	targetDate, err := time.Parse("2006-01-02", req.TargetDate)
 	if err != nil {
+		fmt.Println("Received TargetDate:", req.TargetDate)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Use YYYY-MM-DD"})
 		return
 	}
@@ -676,6 +717,7 @@ func addGoalHandler(c *gin.Context) {
 		return
 	}
 
+	user.Preferences.GoalName = req.GoalName
 	user.Preferences.GoalAmount = req.GoalAmount
 	user.Preferences.TargetDate = targetDate
 
@@ -702,6 +744,7 @@ func changeGoalHandler(c *gin.Context) {
 	}
 
 	var req struct {
+		GoalName   string  `json:"goal_name"`
 		GoalAmount float64 `json:"goal_amount"`
 		TargetDate string  `json:"target_date"`
 	}
@@ -712,7 +755,7 @@ func changeGoalHandler(c *gin.Context) {
 		return
 	}
 
-	targetDate, err := time.Parse("2006-10-17", req.TargetDate)
+	targetDate, err := time.Parse("2006-01-02", req.TargetDate)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid date format. Use YYYY-MM-DD"})
 		return
@@ -729,6 +772,7 @@ func changeGoalHandler(c *gin.Context) {
 		return
 	}
 
+	user.Preferences.GoalName = req.GoalName
 	user.Preferences.GoalAmount = req.GoalAmount
 	user.Preferences.TargetDate = targetDate
 
@@ -750,12 +794,57 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 		return "", "", fmt.Errorf("User not found: %v", err)
 	}
 
+	if user.Preferences.GoalAmount == 0 || user.Preferences.TargetDate.IsZero() || user.Preferences.TargetDate.Before(time.Now()) {
+
+		// FIXME
+
+		fmt.Println("No goal amount. considering base roundup")
+
+		// If user has no goal, just save the base amount
+		Roundup := slabBasedRoundup(transaction.Amount*(1+BaseRoundupPercent)) - transaction.Amount
+		Roundup = math.Max(0, Roundup)
+		transaction.Roundup = Roundup
+
+		user.Preferences.RoundupHistory = append(user.Preferences.RoundupHistory, Roundup)
+		user.Preferences.RoundupDates = append(user.Preferences.RoundupDates, time.Now())
+
+		// add to the transaction repo
+		if err := s.repo.SaveTransaction(transaction); err != nil {
+			return "", "", fmt.Errorf("failed to update transaction: %v", err)
+		}
+
+		// update user pref
+		user.Preferences.CurrentSavings += Roundup
+		user.Preferences.RoundupHistory = append(user.Preferences.RoundupHistory, Roundup)
+		user.Preferences.RoundupDates = append(user.Preferences.RoundupDates, time.Now())
+
+		// Save pref to user repo
+		if err := s.userRepo.UpdatePreferences(userID, user.Preferences); err != nil {
+			return "", "", fmt.Errorf("failed to update user preferences: %v", err)
+		}
+
+		// UPI Part
+
+		merchantURI, err := s.upiClient.GenerateUPIURI(transaction, transaction.Merchant, transaction.Amount)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to generate UPI URI for merchant: %v", err)
+		}
+
+		roundupURI, err := s.upiClient.GenerateUPIURI(transaction, roundUpAccount, transaction.Amount)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to generate UPI URI for RoundUp: %v", err)
+		}
+
+		return merchantURI, roundupURI, nil
+	}
+
 	// if the transaction category is not present in the users pref category, return nill
 	if len(user.Preferences.RoundupCategories) > 0 && !contains(user.Preferences.RoundupCategories, transaction.Category) {
 		return "", "", nil
 	}
 
-	baseRoundup := slabBasedRoundup(transaction.Amount*(1+BaseRoundupPercent)) - transaction.Amount
+	rawBaseRoundup := slabBasedRoundup(transaction.Amount*(1+BaseRoundupPercent)) - transaction.Amount
+	baseRoundup := math.Max(rawBaseRoundup, 0)
 
 	daysRemaining := math.Floor(time.Until(user.Preferences.TargetDate).Hours() / 24)
 	// minimum 1 day
@@ -798,7 +887,9 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	Roundup := baseRoundup * pressure
 
-	transaction.Roundup = math.Round(Roundup*100) / 100 // roundup to 2 digits
+	fmt.Sprintf("%.2f", Roundup)
+
+	transaction.Roundup = Roundup // roundup to 2 digits
 
 	// add to the transaction repo
 	if err := s.repo.SaveTransaction(transaction); err != nil {
@@ -829,18 +920,32 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	return merchantURI, roundupURI, nil
 }
-
 func slabBasedRoundup(amount float64) float64 {
-	switch {
-	case amount <= 50:
-		return math.Ceil(amount/5) * 5
-	case amount <= 200:
-		return math.Ceil(amount/10) * 10
-	case amount <= 500:
-		return math.Ceil(amount/50) * 50
-	default:
-		return math.Ceil(amount/100) * 100
+	// TODO
+
+	// Maximum extra amount user wouldn't mind paying (8% of the transaction amount)
+	maxRoundup := 0.08 * amount
+
+	// Define possible increments (in descending order to try larger roundups first)
+	units := []float64{100, 50, 10, 5, 1}
+
+	var bestRoundup float64 = 0
+
+	for _, unit := range units {
+		// Calculate the roundup if we round up to the next multiple of unit
+		candidate := math.Ceil(amount/unit)*unit - amount
+		// Choose the candidate if it is within the acceptable threshold and is larger than what we had before
+		if candidate <= maxRoundup && candidate > bestRoundup {
+			bestRoundup = candidate
+		}
 	}
+
+	// Fallback: if none of the units produce a roundup within the threshold, round up to the nearest whole number.
+	if bestRoundup == 0 {
+		bestRoundup = math.Ceil(amount) - amount
+	}
+
+	return bestRoundup
 }
 
 func contains(categories []string, target string) bool {
