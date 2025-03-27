@@ -135,14 +135,9 @@ func main() {
 
 // Database connection
 func connectDB() (*sql.DB, error) {
-	// Read the host from the environment variable; default to "postgres" if not set
-	dbHost := os.Getenv("DB_HOST")
-	if dbHost == "" {
-		dbHost = "postgres"
-	}
-
-	connStr := fmt.Sprintf("host=%s user=roundup_user password=roundup123 dbname=roundup sslmode=disable", dbHost)
+	connStr := "user=roundup_user password=roundup123 dbname=roundup sslmode=disable"
 	db, err := sql.Open("postgres", connStr)
+
 	if err != nil {
 		fmt.Println(err)
 		return nil, err
