@@ -4,11 +4,31 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+func extractUPIDetails(upiURI string) (string, string, string, error) {
+	parsedURI, err := url.Parse(upiURI)
+	if err != nil || !strings.HasPrefix(upiURI, "upi://pay") {
+		return "", "", "", err
+	}
+
+	queryParams := parsedURI.Query()
+	upiID := queryParams.Get("pa") // Payee Address
+	merchantName := queryParams.Get("pn")
+	currency := queryParams.Get("cu")
+
+	// Ensure UPI ID exists
+	if upiID == "" {
+		return "", "", "", err
+	}
+
+	return upiID, merchantName, currency, nil
+}
 
 // Business logic functions
 func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) (float64, string, string, error) {

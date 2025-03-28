@@ -119,6 +119,37 @@ func registerHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
+func verifyUPIHandler(c *gin.Context) {
+
+	// Response structure
+	type VerifyUPIURIResponse struct {
+		Valid        bool   `json:"valid"`
+		UPIID        string `json:"upi_id,omitempty"`
+		MerchantName string `json:"merchant_name,omitempty"`
+		Currency     string `json:"currency,omitempty"`
+		Error        string `json:"error,omitempty"`
+	}
+
+	var req VerifyUPIURIRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, VerifyUPIURIResponse{Valid: false, Error: "Invalid request"})
+		return
+	}
+
+	upiID, merchantName, currency, err := extractUPIDetails(req.UPIURI)
+	if err != nil || upiID == "" {
+		c.JSON(http.StatusOK, VerifyUPIURIResponse{Valid: false, Error: "Invalid UPI URI"})
+		return
+	}
+
+	c.JSON(http.StatusOK, VerifyUPIURIResponse{
+		Valid:        true,
+		UPIID:        upiID,
+		MerchantName: merchantName,
+		Currency:     currency,
+	})
+}
+
 func getTransactionsHandler(c *gin.Context) {
 	// get userID from gin Context
 	userID, exists := c.Get("userID")

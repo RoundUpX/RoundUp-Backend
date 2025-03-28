@@ -24,6 +24,10 @@ type User struct {
 	CreatedAt   time.Time       `json:"created_at"`
 }
 
+type VerifyUPIURIRequest struct {
+	UPIURI string `json:"upi_uri" binding:"required"`
+}
+
 type UserPreferences struct {
 	RoundupCategories []string    `json:"roundup_categories"` // things like "food", "clothes", "groceries"
 	GoalName          string      `json:"goal_name"`          // trip

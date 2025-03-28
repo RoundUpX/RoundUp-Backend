@@ -37,6 +37,7 @@ func main() {
 	// public routes
 	router.POST("/api/v1/auth/register", registerHandler)
 	router.POST("/api/v1/auth/login", loginHandler)
+	router.POST("/api/v1/upi/verify", verifyUPIHandler)
 
 	// protected routes
 	authorized := router.Group("/api/v1")
