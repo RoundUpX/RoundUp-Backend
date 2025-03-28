@@ -72,6 +72,15 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 		return 0.0, "", "", err
 	}
 
+	if Roundup > 0 {
+		// Add roundup amount to user's wallet
+		err = s.AddToWallet(userID, Roundup, fmt.Sprintf("Roundup from %s transaction of ₹%.2f", transaction.Category, transaction.Amount))
+		if err != nil {
+			log.Printf("Error adding roundup to wallet: %v\n", err)
+			// TODO: Continue processing even if wallet update fails
+		}
+	}
+
 	uri1, uri2, err := s.generateUPIURIs(transaction)
 	if err != nil {
 		log.Printf("Error generating UPI URIs: %v\n", err)

@@ -109,6 +109,13 @@ func registerHandler(c *gin.Context) {
 		return
 	}
 
+	// Create wallet for the new user
+	err = txnService.CreateUserWallet(newUser.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user wallet"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
 }
 
