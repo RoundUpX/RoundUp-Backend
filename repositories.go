@@ -112,7 +112,7 @@ func (r *PostgresUserRepository) CreateUserPreferences(userID string, prefs User
 	query := `
 		INSERT INTO user_preferences
 		(user_id, roundup_categories, goal_amount, target_date, current_savings, roundup_history, roundup_dates)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`
 	_, err := r.db.Exec(query,
 		userID,

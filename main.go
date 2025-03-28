@@ -23,11 +23,13 @@ func main() {
 	txRepo := &PostgresTransactionRepository{db: db}
 	userRepo := &PostgresUserRepository{db: db}
 	UPIclient := &DummyUPIClient{}
+	walletRepo := &PostgresWalletRepository{db: db}
 
 	txnService = &TransactionService{
-		repo:      txRepo,
-		userRepo:  userRepo,
-		upiClient: UPIclient,
+		repo:       txRepo,
+		userRepo:   userRepo,
+		upiClient:  UPIclient,
+		walletRepo: walletRepo,
 	}
 
 	router := gin.Default()
