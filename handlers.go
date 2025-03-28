@@ -104,6 +104,7 @@ func registerHandler(c *gin.Context) {
 
 	err = txnService.userRepo.CreateUserPreferences(newUser.ID, defaultPrefs)
 	if err != nil {
+		fmt.Println(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user preferences"})
 		return
 	}
