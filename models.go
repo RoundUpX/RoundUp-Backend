@@ -51,13 +51,14 @@ type WalletTransaction struct {
 }
 
 type Transaction struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Amount    float64   `json:"amount"`
-	Category  string    `json:"category"`
-	Roundup   float64   `json:"roundup"`
-	CreatedAt time.Time `json:"created_at"`
-	Merchant  string    `json:"merchant"` // upi
+	ID             string    `json:"id"`
+	UserID         string    `json:"user_id"`
+	Amount         float64   `json:"amount"`
+	Category       string    `json:"category"`
+	Roundup        float64   `json:"roundup"`
+	CreatedAt      time.Time `json:"created_at"`
+	Merchant       string    `json:"merchant"` // upi id
+	RoundupEnabled bool      `json:"roundup_enabled"`
 }
 
 type TransactionService struct {

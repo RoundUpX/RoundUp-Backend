@@ -13,6 +13,18 @@ import (
 // Business logic functions
 func (s *TransactionService) ProcessRoundup(userID string, transaction Transaction) (float64, string, string, error) {
 
+	if !transaction.RoundupEnabled {
+
+		transaction.Roundup = 0.0
+		uri1, _, err := s.generateUPIURIs(transaction)
+		if err != nil {
+			log.Printf("Error generating UPI URIs: %v\n", err)
+			return 0.0, "", "", err
+		}
+
+		return 0.0, uri1, "", nil
+	}
+
 	// Find the user in userRepo to get their preferences
 	user, err := s.userRepo.FindByID(userID)
 	if err != nil {
@@ -37,14 +49,13 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 	}
 
 	// Calculate raw base roundup
-	rawBaseRoundup := (transaction.Amount * (1 + BaseRoundupPercent)) - transaction.Amount
+	rawBaseRoundup := (transaction.Amount * BaseRoundupPercent)
 	baseRoundup := math.Max(rawBaseRoundup, 0)
 
 	// Calculate days remaining until the target date
 	daysRemaining := math.Floor(time.Until(user.Preferences.TargetDate).Hours() / 24)
 	daysRemaining = math.Max(1, daysRemaining) // Ensure minimum of 1 day
 
-	// FIXME
 	averageRoundup := s.calculateAvgRoundup()
 
 	remainingAmount := user.Preferences.GoalAmount - user.Preferences.CurrentSavings
@@ -59,7 +70,7 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	pressure := calculatePressure(requiredTxns, projectedTxns)
 
-	Roundup := baseRoundup * pressure
+	Roundup := math.Min(baseRoundup*pressure, remainingAmount)
 
 	if Roundup < 1 {
 		log.Printf("Calculated roundup %.2f is below threshold. Skipping.\n", Roundup)

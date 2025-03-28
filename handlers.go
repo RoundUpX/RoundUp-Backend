@@ -160,6 +160,7 @@ func addTransactionHandler(c *gin.Context) {
 	var txn Transaction
 	err := c.BindJSON(&txn)
 	if err != nil {
+		fmt.Println(err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid transaction input"})
 		return
 	}

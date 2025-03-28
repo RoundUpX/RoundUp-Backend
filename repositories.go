@@ -14,14 +14,14 @@ type PostgresTransactionRepository struct {
 }
 
 func (r *PostgresTransactionRepository) SaveTransaction(tx Transaction) error {
-	query := "INSERT INTO transactions (id, user_id, amount, category, roundup, created_at, merchant) VALUES ($1, $2, $3, $4, $5, $6, $7)"
-	_, err := r.db.Exec(query, tx.ID, tx.UserID, tx.Amount, tx.Category, tx.Roundup, tx.CreatedAt, tx.Merchant)
+	query := "INSERT INTO transactions (id, user_id, amount, category, roundup, created_at, merchant, roundup_enabled) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+	_, err := r.db.Exec(query, tx.ID, tx.UserID, tx.Amount, tx.Category, tx.Roundup, tx.CreatedAt, tx.Merchant, tx.RoundupEnabled)
 	fmt.Println(err)
 	return err
 }
 
 func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) ([]Transaction, error) {
-	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant FROM transactions WHERE user_id = $1"
+	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant, roundup_enabled FROM transactions WHERE user_id = $1"
 	rows, err := r.db.Query(query, userID)
 
 	if err != nil {
@@ -34,7 +34,7 @@ func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) (
 	var transactions []Transaction
 	for rows.Next() {
 		var tx Transaction
-		err := rows.Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
+		err := rows.Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant, &tx.RoundupEnabled)
 
 		if err != nil {
 			fmt.Println(err)
@@ -48,10 +48,10 @@ func (r *PostgresTransactionRepository) GetTransactionsByUserID(userID string) (
 }
 
 func (r *PostgresTransactionRepository) GetTransactionByID(id string) (*Transaction, error) {
-	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant FROM transactions WHERE id = $1"
+	query := "SELECT id, user_id, amount, category, roundup, created_at, merchant, roundup_enabled FROM transactions WHERE id = $1"
 
 	var tx Transaction
-	err := r.db.QueryRow(query, id).Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant)
+	err := r.db.QueryRow(query, id).Scan(&tx.ID, &tx.UserID, &tx.Amount, &tx.Category, &tx.Roundup, &tx.CreatedAt, &tx.Merchant, &tx.RoundupEnabled)
 
 	if err != nil {
 		fmt.Println(err)
@@ -271,5 +271,7 @@ func (r *PostgresTransactionRepository) GetTotalRoundupInPeriod(days int) (float
 		fmt.Println("Error fetching total roundup from DB:", err)
 		return 0, err
 	}
+
+	fmt.Println(totalRoundup)
 	return totalRoundup, nil
 }
