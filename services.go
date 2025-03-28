@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -8,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/generative-ai-go/genai"
 	"github.com/google/uuid"
+	"google.golang.org/api/option"
 )
 
 func extractUPIDetails(upiURI string) (string, string, string, error) {
@@ -28,6 +31,33 @@ func extractUPIDetails(upiURI string) (string, string, string, error) {
 	}
 
 	return upiID, merchantName, currency, nil
+}
+
+func findTransactionType(upiID, payeeName string) (int, error) {
+
+	ctx := context.Background()
+
+	client, err := genai.NewClient(ctx, option.WithAPIKey("AIzaSyCBhES1vOqE5OQyHXjffVhNIvhry2mxG1Q"))
+	if err != nil {
+		return -1, fmt.Errorf("failed to create client: %w", err)
+	}
+	defer client.Close()
+
+	model := client.GenerativeModel("gemini-1.5-flash")
+	resp, err := model.GenerateContent(ctx, genai.Text(fmt.Sprintf("Transaction Categorization: Given the following transaction details: UPI ID: %s Payee Name: %s Please determine the most appropriate category for this transaction from the following list: Groceries, Rent & Utilities, Transportation, Healthcare, Dining & Food, Clothing & Accessories, Entertainment, Personal Care, Investments, Debt & Loans, Savings & Emergency Fund, Education, Gifts & Donations, Technology & Gadgets, Travel, Subscriptions & Memberships. Provide just the category name as your response.", upiID, payeeName)))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Generated content:", resp.Candidates[0].Content.Parts[0])
+
+	for i, category := range categories {
+		if payeeName == category {
+			return i, nil
+		}
+	}
+
+	return -1, nil // Return -1 for miscellaneous if no match found
 }
 
 // Business logic functions
@@ -126,7 +156,6 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 		err = s.AddToWallet(userID, Roundup, fmt.Sprintf("Roundup from %s transaction of ₹%.2f", transaction.Category, transaction.Amount))
 		if err != nil {
 			log.Printf("Error adding roundup to wallet: %v\n", err)
-			// TODO: Continue processing even if wallet update fails
 		}
 	}
 

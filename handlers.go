@@ -150,6 +150,26 @@ func verifyUPIHandler(c *gin.Context) {
 	})
 }
 
+func getTransactionTypeHandler(c *gin.Context) {
+	var request struct {
+		UPIID     string `json:"upiID"`
+		PayeeName string `json:"payeeName"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid input"})
+		return
+	}
+
+	categoryIndex, err := findTransactionType(request.UPIID, request.PayeeName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error finding transaction type"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"category_index": categoryIndex})
+}
+
 func getTransactionsHandler(c *gin.Context) {
 	// get userID from gin Context
 	userID, exists := c.Get("userID")

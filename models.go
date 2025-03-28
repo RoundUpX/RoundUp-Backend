@@ -99,3 +99,21 @@ type WalletRepository interface {
 	AddWalletTransaction(tx WalletTransaction) error
 	GetWalletTransactions(walletID string) ([]WalletTransaction, error)
 }
+
+var categories = []string{
+	"Groceries",
+	"Rent & Utilities",
+	"Transportation",
+	"Healthcare",
+	"Dining & Food",
+	"Clothing & Accessories",
+	"Entertainment",
+	"Personal Care",
+	"Investments",
+	"Debt & Loans", "Savings & Emergency Fund",
+	"Education",
+	"Gifts & Donations",
+	"Technology & Gadgets",
+	"Travel",
+	"Subscriptions & Memberships",
+}
