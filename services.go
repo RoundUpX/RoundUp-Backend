@@ -47,34 +47,17 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	requiredTxns := math.Floor(remainingAmount / averageRoundup)
 
-	recentPeriod := RecentPeriodDays * 24 * time.Hour
-	cutoff := time.Now().Add(-recentPeriod)
+	recentDates := filterRecentDates(user.Preferences.RoundupDates, RecentPeriodDays)
 
-	recentDates := []time.Time{}
-	for _, txnDate := range user.Preferences.RoundupDates {
-		if txnDate.After(cutoff) {
-			recentDates = append(recentDates, txnDate)
-		}
-	}
-
-	var avgTxnsPerDay float64
-	if len(recentDates) > 0 {
-		avgTxnsPerDay = float64(len(recentDates)) / RecentPeriodDays
-	} else {
-		avgTxnsPerDay = DefaultAvgTxnsPerDay // Use default if no recent transactions exist
-	}
+	avgTxnsPerDay := calculateAvgTxnsPerDay(recentDates, RecentPeriodDays)
 
 	projectedTxns := avgTxnsPerDay * daysRemaining
 
-	var pressure float64 = MinPressure // Default minimum pressure
-	if requiredTxns > 0 && projectedTxns > 0 {
-		pressure = math.Max(requiredTxns/projectedTxns, MinPressure)
-	}
-	pressure = math.Min(pressure, MaxPressure)
+	pressure := calculatePressure(requiredTxns, projectedTxns)
 
 	Roundup := baseRoundup * pressure
 
-	if Roundup < 1 { // Lower threshold for skipping roundups
+	if Roundup < 1 {
 		log.Printf("Calculated roundup %.2f is below threshold. Skipping.\n", Roundup)
 		return 0.0, "", "", nil
 	}
@@ -97,7 +80,8 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 }
 
 func (s *TransactionService) processBaseRoundup(userID string, transaction Transaction) (float64, string, string, error) {
-	Roundup := (transaction.Amount * (1 + BaseRoundupPercent)) - transaction.Amount
+
+	Roundup := transaction.Amount * BaseRoundupPercent
 	Roundup = math.Max(0, Roundup)
 
 	transaction.Roundup = Roundup
@@ -111,7 +95,34 @@ func (s *TransactionService) processBaseRoundup(userID string, transaction Trans
 	if err != nil {
 		return 0.0, "", "", err
 	}
+
 	return Roundup, uri1, uri2, nil
+}
+
+func filterRecentDates(dates []time.Time, recentDays int) []time.Time {
+	cutoff := time.Now().Add(-time.Duration(recentDays) * 24 * time.Hour)
+	var recentDates []time.Time
+	for _, date := range dates {
+		if date.After(cutoff) {
+			recentDates = append(recentDates, date)
+		}
+	}
+	return recentDates
+}
+
+func calculateAvgTxnsPerDay(recentDates []time.Time, recentDays int) float64 {
+	if len(recentDates) == 0 {
+		return DefaultAvgTxnsPerDay
+	}
+	return float64(len(recentDates)) / float64(recentDays)
+}
+
+func calculatePressure(requiredTxns, projectedTxns float64) float64 {
+	pressure := MinPressure
+	if projectedTxns > 0 {
+		pressure = math.Max(requiredTxns/projectedTxns, MinPressure)
+	}
+	return math.Min(pressure, MaxPressure)
 }
 
 func contains(categories []string, target string) bool {

@@ -333,7 +333,6 @@ func addGoalHandler(c *gin.Context) {
 		return
 	}
 
-	// TODO Multiple goals per user?
 	if user.Preferences.GoalAmount > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Goal already exists. Create PUT request to update it"})
 		return

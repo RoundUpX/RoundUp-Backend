@@ -5,12 +5,11 @@ import (
 )
 
 // define magic numbers
-// TODO: Decide all these!!!
 const BaseRoundupPercent = 0.05
 const RecentPeriodDays = 7
-const MinPressure = 0.5
-const MaxPressure = 5
-const DefaultAvgTxnsPerDay = 2
+const MinPressure = 0.3
+const MaxPressure = 4
+const DefaultAvgTxnsPerDay = 3
 
 const roundUpAccount = "meet1771.mm@okhdfcbank"
 
