@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/lib/pq"
 )
@@ -76,8 +77,9 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 		return nil, err
 	}
 
+	var roundupDates []string // Temporarily store dates as strings
 	// Fetch user preferences separately
-	query = "SELECT roundup_categories, goal_name, goal_amount, target_date, current_savings, average_roundup FROM user_preferences WHERE user_id = $1"
+	query = "SELECT roundup_categories, goal_name, goal_amount, target_date, current_savings, average_roundup, roundup_history, roundup_dates FROM user_preferences WHERE user_id = $1"
 	err = r.db.QueryRow(query, id).Scan(
 		pq.Array(&user.Preferences.RoundupCategories),
 		&user.Preferences.GoalName,
@@ -85,11 +87,25 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 		&user.Preferences.TargetDate,
 		&user.Preferences.CurrentSavings,
 		&user.Preferences.AverageRoundup,
+		pq.Array(&user.Preferences.RoundupHistory),
+		pq.Array(&roundupDates),
 	)
+
 	if err != nil {
 		fmt.Println(err)
 		return nil, err
 	}
+
+	user.Preferences.RoundupDates = []time.Time{}
+	for _, dateStr := range roundupDates {
+		parsedTime, parseErr := time.Parse("2006-01-02 15:04:05.999999", dateStr)
+		if parseErr != nil {
+			fmt.Printf("Error parsing date '%s': %v\n", dateStr, parseErr)
+			continue
+		}
+		user.Preferences.RoundupDates = append(user.Preferences.RoundupDates, parsedTime)
+	}
+
 	return &user, nil
 }
 
