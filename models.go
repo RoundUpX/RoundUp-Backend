@@ -8,7 +8,7 @@ import (
 const BaseRoundupPercent = 0.05
 const RecentPeriodDays = 7
 const MinPressure = 0.3
-const MaxPressure = 4
+const MaxPressure = 3
 const DefaultAvgTxnsPerDay = 3
 
 const roundUpAccount = "meet1771.mm@okhdfcbank"
