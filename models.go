@@ -25,7 +25,7 @@ type User struct {
 }
 
 type VerifyUPIURIRequest struct {
-	UPIURI string `json:"upi_uri" binding:"required"`
+	UPIURI string `json:"url" binding:"required"`
 }
 
 type UserPreferences struct {
