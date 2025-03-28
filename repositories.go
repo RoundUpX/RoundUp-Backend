@@ -268,10 +268,9 @@ func (r *PostgresTransactionRepository) GetTotalRoundupInPeriod(days int) (float
 	var totalRoundup float64
 	err := r.db.QueryRow(query, days).Scan(&totalRoundup)
 	if err != nil {
-		fmt.Println("Error fetching total roundup from DB:", err)
+		fmt.Println(err)
 		return 0, err
 	}
 
-	fmt.Println(totalRoundup)
 	return totalRoundup, nil
 }
