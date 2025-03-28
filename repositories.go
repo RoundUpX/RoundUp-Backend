@@ -177,17 +177,17 @@ func (r *PostgresUserRepository) Update(user *User) error {
 }
 
 func (r *PostgresUserRepository) updatePreferences(tx *sql.Tx, userID string, prefs UserPreferences) error {
-	query := "UPDATE user_preferences SET roundup_categories = $1, goal_name = $9, goal_amount = $2, target_date = $3, current_savings = $4, roundup_history = $5, roundup_dates = $6 WHERE user_id = $7"
+	query := "UPDATE user_preferences SET roundup_categories = $1, goal_name = $2, goal_amount = $3, target_date = $4, current_savings = $5, roundup_history = $6, roundup_dates = $7 WHERE user_id = $8"
 
 	_, err := tx.Exec(query,
 		pq.Array(prefs.RoundupCategories),
+		prefs.GoalName,
 		prefs.GoalAmount,
 		prefs.TargetDate,
 		prefs.CurrentSavings,
 		pq.Array(prefs.RoundupHistory),
 		pq.Array(prefs.RoundupDates),
 		userID,
-		prefs.GoalName,
 	)
 	fmt.Println(err)
 	return err
