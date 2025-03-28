@@ -79,14 +79,13 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 
 	var roundupDates []string // Temporarily store dates as strings
 	// Fetch user preferences separately
-	query = "SELECT roundup_categories, goal_name, goal_amount, target_date, current_savings, average_roundup, roundup_history, roundup_dates FROM user_preferences WHERE user_id = $1"
+	query = "SELECT roundup_categories, goal_name, goal_amount, target_date, current_savings, roundup_history, roundup_dates FROM user_preferences WHERE user_id = $1"
 	err = r.db.QueryRow(query, id).Scan(
 		pq.Array(&user.Preferences.RoundupCategories),
 		&user.Preferences.GoalName,
 		&user.Preferences.GoalAmount,
 		&user.Preferences.TargetDate,
 		&user.Preferences.CurrentSavings,
-		&user.Preferences.AverageRoundup,
 		pq.Array(&user.Preferences.RoundupHistory),
 		pq.Array(&roundupDates),
 	)
@@ -112,7 +111,7 @@ func (r *PostgresUserRepository) FindByID(id string) (*User, error) {
 func (r *PostgresUserRepository) CreateUserPreferences(userID string, prefs UserPreferences) error {
 	query := `
 		INSERT INTO user_preferences
-		(user_id, roundup_categories, goal_amount, target_date, current_savings, average_roundup, roundup_history, roundup_dates)
+		(user_id, roundup_categories, goal_amount, target_date, current_savings, roundup_history, roundup_dates)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 	_, err := r.db.Exec(query,
@@ -121,7 +120,6 @@ func (r *PostgresUserRepository) CreateUserPreferences(userID string, prefs User
 		prefs.GoalAmount,
 		prefs.TargetDate,
 		prefs.CurrentSavings,
-		prefs.AverageRoundup,
 		pq.Array(prefs.RoundupHistory),
 		pq.Array(prefs.RoundupDates),
 	)
@@ -136,17 +134,15 @@ func (r *PostgresUserRepository) UpdatePreferences(userID string, prefs UserPref
         goal_amount = $2,
         target_date = $3,
         current_savings = $4,
-        average_roundup = $5,
-        roundup_history = $6,
-        roundup_dates = $7
-    WHERE user_id = $8
+        roundup_history = $5,
+        roundup_dates = $6
+    WHERE user_id = $7
     `
 	_, err := r.db.Exec(query,
 		pq.Array(prefs.RoundupCategories),
 		prefs.GoalAmount,
 		prefs.TargetDate,
 		prefs.CurrentSavings,
-		prefs.AverageRoundup,
 		pq.Array(prefs.RoundupHistory),
 		pq.Array(prefs.RoundupDates),
 		userID,
@@ -181,14 +177,13 @@ func (r *PostgresUserRepository) Update(user *User) error {
 }
 
 func (r *PostgresUserRepository) updatePreferences(tx *sql.Tx, userID string, prefs UserPreferences) error {
-	query := "UPDATE user_preferences SET roundup_categories = $1, goal_name = $9, goal_amount = $2, target_date = $3, current_savings = $4, average_roundup = $5, roundup_history = $6, roundup_dates = $7 WHERE user_id = $8"
+	query := "UPDATE user_preferences SET roundup_categories = $1, goal_name = $9, goal_amount = $2, target_date = $3, current_savings = $4, roundup_history = $5, roundup_dates = $6 WHERE user_id = $7"
 
 	_, err := tx.Exec(query,
 		pq.Array(prefs.RoundupCategories),
 		prefs.GoalAmount,
 		prefs.TargetDate,
 		prefs.CurrentSavings,
-		prefs.AverageRoundup,
 		pq.Array(prefs.RoundupHistory),
 		pq.Array(prefs.RoundupDates),
 		userID,

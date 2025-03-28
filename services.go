@@ -44,7 +44,9 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 	daysRemaining := math.Floor(time.Until(user.Preferences.TargetDate).Hours() / 24)
 	daysRemaining = math.Max(1, daysRemaining) // Ensure minimum of 1 day
 
-	averageRoundup := math.Max(user.Preferences.AverageRoundup, 10) // Fallback to ₹10 if zero
+	// FIXME
+	averageRoundup := calculateAvgRoundup()
+
 	remainingAmount := user.Preferences.GoalAmount - user.Preferences.CurrentSavings
 
 	requiredTxns := math.Floor(remainingAmount / averageRoundup)
@@ -126,6 +128,11 @@ func calculateAvgTxnsPerDay(recentDates []time.Time, recentDays int) float64 {
 		return DefaultAvgTxnsPerDay
 	}
 	return float64(len(recentDates)) / float64(recentDays)
+}
+
+func calculateAvgRoundup() float64 {
+	return 10.0
+	// TODO
 }
 
 func calculatePressure(requiredTxns, projectedTxns float64) float64 {

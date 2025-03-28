@@ -98,7 +98,6 @@ func registerHandler(c *gin.Context) {
 		GoalAmount:        0,
 		TargetDate:        time.Time{},
 		CurrentSavings:    0,
-		AverageRoundup:    0,
 		RoundupHistory:    []float64{},
 		RoundupDates:      []time.Time{},
 	}

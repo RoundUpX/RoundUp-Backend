@@ -10,6 +10,7 @@ const RecentPeriodDays = 7
 const MinPressure = 0.3
 const MaxPressure = 3
 const DefaultAvgTxnsPerDay = 3
+const DefaultAvgTxnRoundup = 10
 
 const roundUpAccount = "meet1771.mm@okhdfcbank"
 
@@ -29,7 +30,6 @@ type UserPreferences struct {
 	GoalAmount        float64     `json:"goal_amount"`        // 5000
 	TargetDate        time.Time   `json:"target_date"`        // 4th May
 	CurrentSavings    float64     `json:"current_savings"`    // amount already saved
-	AverageRoundup    float64     `json:"average_roundup"`    // average amount roundedup per txn in last 30 txns
 	RoundupHistory    []float64   `json:"roundup_history"`    // contains all roundups done in past
 	RoundupDates      []time.Time `json:"roundup_dates"`      // stores when the roundup took place
 }
