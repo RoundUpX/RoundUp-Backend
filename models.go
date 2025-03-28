@@ -71,6 +71,7 @@ type TransactionRepository interface {
 	SaveTransaction(tx Transaction) error
 	GetTransactionsByUserID(userID string) ([]Transaction, error)
 	GetTransactionByID(id string) (*Transaction, error)
+	GetTotalRoundupInPeriod(days int) (float64, error)
 }
 
 type UserRepository interface {

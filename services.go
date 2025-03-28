@@ -45,7 +45,7 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 	daysRemaining = math.Max(1, daysRemaining) // Ensure minimum of 1 day
 
 	// FIXME
-	averageRoundup := calculateAvgRoundup()
+	averageRoundup := s.calculateAvgRoundup()
 
 	remainingAmount := user.Preferences.GoalAmount - user.Preferences.CurrentSavings
 
@@ -130,9 +130,16 @@ func calculateAvgTxnsPerDay(recentDates []time.Time, recentDays int) float64 {
 	return float64(len(recentDates)) / float64(recentDays)
 }
 
-func calculateAvgRoundup() float64 {
-	return 10.0
-	// TODO
+func (s *TransactionService) calculateAvgRoundup() float64 {
+	// get total rounded-up amount from transactions in the last 7 days
+	totalRoundup, err := s.repo.GetTotalRoundupInPeriod(7)
+	if err != nil {
+		log.Printf("Error fetching total roundup from DB: %v", err)
+		return 10 // return default value
+	}
+
+	// Calculate average roundup over the last 7 days
+	return totalRoundup / 7
 }
 
 func calculatePressure(requiredTxns, projectedTxns float64) float64 {
