@@ -80,6 +80,14 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 
 	remainingAmount := user.Preferences.GoalAmount - user.Preferences.CurrentSavings
 
+	if remainingAmount < 0 {
+		RoundUp, uri1, uri2, err := s.processBaseRoundup(userID, transaction)
+		if err != nil {
+			return 0.0, "", "", err
+		}
+		return RoundUp, uri1, uri2, nil
+	}
+
 	requiredTxns := math.Floor(remainingAmount / averageRoundup)
 
 	recentDates := filterRecentDates(user.Preferences.RoundupDates, RecentPeriodDays)
@@ -91,6 +99,14 @@ func (s *TransactionService) ProcessRoundup(userID string, transaction Transacti
 	pressure := calculatePressure(requiredTxns, projectedTxns)
 
 	Roundup := math.Min(baseRoundup*pressure, remainingAmount)
+
+	log.Printf("Base Roundup: %.2f", baseRoundup)
+	log.Printf("Days Remaining: %.2f", daysRemaining)
+	log.Printf("Average Roundup: %.2f", averageRoundup)
+	log.Printf("Remaining Amount: %.2f", remainingAmount)
+	log.Printf("Required Transactions: %.2f", requiredTxns)
+	log.Printf("Projected Transactions: %.2f", projectedTxns)
+	log.Printf("Pressure: %.2f", pressure)
 
 	if Roundup < 1 {
 		log.Printf("Calculated roundup %.2f is below threshold. Skipping.\n", Roundup)
