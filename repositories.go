@@ -264,7 +264,7 @@ func (r *PostgresWalletRepository) GetWalletTransactions(walletID string) ([]Wal
 }
 
 func (r *PostgresTransactionRepository) GetTotalRoundupInPeriod(days int) (float64, error) {
-	query := "SELECT COALESCE(SUM(roundup), 0) FROM transactions WHERE created_at >= NOW() - INTERVAL $1 DAY"
+	query := "SELECT COALESCE(SUM(roundup), 0) FROM transactions WHERE created_at >= NOW() - ($1 * INTERVAL '1 DAY')"
 	var totalRoundup float64
 	err := r.db.QueryRow(query, days).Scan(&totalRoundup)
 	if err != nil {
