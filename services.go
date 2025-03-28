@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Business logic functions
@@ -156,4 +158,85 @@ func (s *TransactionService) saveTransactionAndPreferences(userID string, transa
 	}
 
 	return nil
+}
+
+func (s *TransactionService) CreateUserWallet(userID string) error {
+	wallet := Wallet{
+		ID:          uuid.New().String(),
+		UserID:      userID,
+		Balance:     0.0,
+		LastUpdated: time.Now(),
+	}
+	return s.walletRepo.CreateWallet(wallet)
+}
+
+func (s *TransactionService) AddToWallet(userID string, amount float64, description string) error {
+	wallet, err := s.walletRepo.GetWalletByUserID(userID)
+	if err != nil {
+		return fmt.Errorf("failed to get wallet: %v", err)
+	}
+
+	// Update wallet balance
+	newBalance := wallet.Balance + amount
+	err = s.walletRepo.UpdateWalletBalance(wallet.ID, newBalance)
+	if err != nil {
+		return fmt.Errorf("failed to update wallet balance: %v", err)
+	}
+
+	// Record transaction
+	tx := WalletTransaction{
+		ID:          uuid.New().String(),
+		WalletID:    wallet.ID,
+		Amount:      amount,
+		Type:        "credit",
+		Description: description,
+		CreatedAt:   time.Now(),
+	}
+	return s.walletRepo.AddWalletTransaction(tx)
+}
+
+func (s *TransactionService) WithdrawFromWallet(userID string, amount float64, description string) error {
+	wallet, err := s.walletRepo.GetWalletByUserID(userID)
+	if err != nil {
+		return fmt.Errorf("failed to get wallet: %v", err)
+	}
+
+	// Check if sufficient balance
+	if wallet.Balance < amount {
+		return fmt.Errorf("insufficient balance")
+	}
+
+	// Update wallet balance
+	newBalance := wallet.Balance - amount
+	err = s.walletRepo.UpdateWalletBalance(wallet.ID, newBalance)
+	if err != nil {
+		return fmt.Errorf("failed to update wallet balance: %v", err)
+	}
+
+	// Record transaction
+	tx := WalletTransaction{
+		ID:          uuid.New().String(),
+		WalletID:    wallet.ID,
+		Amount:      amount,
+		Type:        "debit",
+		Description: description,
+		CreatedAt:   time.Now(),
+	}
+	return s.walletRepo.AddWalletTransaction(tx)
+}
+
+func (s *TransactionService) GetWalletBalance(userID string) (float64, error) {
+	wallet, err := s.walletRepo.GetWalletByUserID(userID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get wallet: %v", err)
+	}
+	return wallet.Balance, nil
+}
+
+func (s *TransactionService) GetWalletTransactions(userID string) ([]WalletTransaction, error) {
+	wallet, err := s.walletRepo.GetWalletByUserID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get wallet: %v", err)
+	}
+	return s.walletRepo.GetWalletTransactions(wallet.ID)
 }

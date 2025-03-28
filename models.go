@@ -34,6 +34,22 @@ type UserPreferences struct {
 	RoundupDates      []time.Time `json:"roundup_dates"`      // stores when the roundup took place
 }
 
+type Wallet struct {
+	ID          string    `json:"id"`
+	UserID      string    `json:"user_id"`
+	Balance     float64   `json:"balance"`
+	LastUpdated time.Time `json:"last_updated"`
+}
+
+type WalletTransaction struct {
+	ID          string    `json:"id"`
+	WalletID    string    `json:"wallet_id"`
+	Amount      float64   `json:"amount"`
+	Type        string    `json:"type"` // "credit" or "debit"
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 type Transaction struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
@@ -45,9 +61,10 @@ type Transaction struct {
 }
 
 type TransactionService struct {
-	repo      TransactionRepository
-	userRepo  UserRepository
-	upiClient UPIClient
+	repo       TransactionRepository
+	userRepo   UserRepository
+	upiClient  UPIClient
+	walletRepo WalletRepository
 }
 
 type TransactionRepository interface {
@@ -67,4 +84,12 @@ type UserRepository interface {
 
 type UPIClient interface {
 	GenerateUPIURI(txn Transaction, toAccount string, amount float64) (string, error)
+}
+
+type WalletRepository interface {
+	CreateWallet(wallet Wallet) error
+	GetWalletByUserID(userID string) (*Wallet, error)
+	UpdateWalletBalance(walletID string, newBalance float64) error
+	AddWalletTransaction(tx WalletTransaction) error
+	GetWalletTransactions(walletID string) ([]WalletTransaction, error)
 }

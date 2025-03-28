@@ -215,3 +215,55 @@ func (r *PostgresUserRepository) GetUserByEmail(email string) (*User, error) {
 	}
 	return &user, nil
 }
+
+type PostgresWalletRepository struct {
+	db *sql.DB
+}
+
+func (r *PostgresWalletRepository) CreateWallet(wallet Wallet) error {
+	query := "INSERT INTO wallets (id, user_id, balance, last_updated) VALUES ($1, $2, $3, $4)"
+	_, err := r.db.Exec(query, wallet.ID, wallet.UserID, wallet.Balance, wallet.LastUpdated)
+	return err
+}
+
+func (r *PostgresWalletRepository) GetWalletByUserID(userID string) (*Wallet, error) {
+	query := "SELECT id, user_id, balance, last_updated FROM wallets WHERE user_id = $1"
+	var wallet Wallet
+	err := r.db.QueryRow(query, userID).Scan(&wallet.ID, &wallet.UserID, &wallet.Balance, &wallet.LastUpdated)
+	if err != nil {
+		return nil, err
+	}
+	return &wallet, nil
+}
+
+func (r *PostgresWalletRepository) UpdateWalletBalance(walletID string, newBalance float64) error {
+	query := "UPDATE wallets SET balance = $1, last_updated = $2 WHERE id = $3"
+	_, err := r.db.Exec(query, newBalance, time.Now(), walletID)
+	return err
+}
+
+func (r *PostgresWalletRepository) AddWalletTransaction(tx WalletTransaction) error {
+	query := "INSERT INTO wallet_transactions (id, wallet_id, amount, type, description, created_at) VALUES ($1, $2, $3, $4, $5, $6)"
+	_, err := r.db.Exec(query, tx.ID, tx.WalletID, tx.Amount, tx.Type, tx.Description, tx.CreatedAt)
+	return err
+}
+
+func (r *PostgresWalletRepository) GetWalletTransactions(walletID string) ([]WalletTransaction, error) {
+	query := "SELECT id, wallet_id, amount, type, description, created_at FROM wallet_transactions WHERE wallet_id = $1 ORDER BY created_at DESC"
+	rows, err := r.db.Query(query, walletID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var transactions []WalletTransaction
+	for rows.Next() {
+		var tx WalletTransaction
+		err := rows.Scan(&tx.ID, &tx.WalletID, &tx.Amount, &tx.Type, &tx.Description, &tx.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		transactions = append(transactions, tx)
+	}
+	return transactions, nil
+}

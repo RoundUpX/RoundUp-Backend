@@ -50,6 +50,12 @@ func main() {
 		authorized.GET("/preferences/goal", getGoalHandler)
 		authorized.POST("/preferences/goal", addGoalHandler)
 		authorized.PUT("/preferences/goal", changeGoalHandler)
+
+		authorized.GET("/wallet/balance", getWalletBalanceHandler)
+		authorized.GET("/wallet/transactions", getWalletTransactionsHandler)
+		authorized.POST("/wallet/add", addToWalletHandler)
+		authorized.POST("/wallet/withdraw", withdrawFromWalletHandler)
+
 	}
 
 	router.Run(":8082")
