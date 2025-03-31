@@ -44,15 +44,28 @@ func findTransactionType(upiID, payeeName string) (int, error) {
 	defer client.Close()
 
 	model := client.GenerativeModel("gemini-1.5-flash")
-	resp, err := model.GenerateContent(ctx, genai.Text(fmt.Sprintf("Transaction Categorization: Given the following transaction details: UPI ID: %s Payee Name: %s Please determine the most appropriate category for this transaction from the following list: Groceries, Rent & Utilities, Transportation, Healthcare, Dining & Food, Clothing & Accessories, Entertainment, Personal Care, Investments, Debt & Loans, Savings & Emergency Fund, Education, Gifts & Donations, Technology & Gadgets, Travel, Subscriptions & Memberships. Provide just the category name as your response.", upiID, payeeName)))
+	resp, err := model.GenerateContent(ctx, genai.Text(fmt.Sprintf("Transaction Categorization: Given the following transaction details: UPI ID: %s Payee Name: %s Please determine the most appropriate category for this transaction from the following list: Groceries, Rent & Utilities, Transportation, Healthcare, Dining & Food, Clothing & Accessories, Entertainment, Investments & Debt & Loans, Technology & Gadgets, Subscriptions & Memberships, Miscellaneous. Provide just the category name as your response.", upiID, payeeName)))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	fmt.Println("Generated content:", resp.Candidates[0].Content.Parts[0])
 
+	// Grab the model's predicted category
+	predictedCategory := fmt.Sprint(resp.Candidates[0].Content.Parts[0])
+
+	// Clean or trim it if necessary
+	predictedCategory = strings.TrimSpace(predictedCategory)
+
+	// Then compare the predictedCategory to your list
 	for i, category := range categories {
-		if payeeName == category {
+		if strings.EqualFold(predictedCategory, category) {
+			return i, nil
+		}
+	}
+
+	for i, category := range categories {
+		if strings.EqualFold(category, predictedCategory) {
 			return i, nil
 		}
 	}
@@ -185,7 +198,7 @@ func (s *TransactionService) processBaseRoundup(userID string, transaction Trans
 		return 0.0, "", "", err
 	}
 
-	return Roundup, uri1, uri2, nil
+	return math.Max(Roundup, 1), uri1, uri2, nil
 }
 
 func filterRecentDates(dates []time.Time, recentDays int) []time.Time {

@@ -101,19 +101,14 @@ type WalletRepository interface {
 }
 
 var categories = []string{
-	"Groceries",
-	"Rent & Utilities",
-	"Transportation",
-	"Healthcare",
-	"Dining & Food",
-	"Clothing & Accessories",
-	"Entertainment",
-	"Personal Care",
-	"Investments",
-	"Debt & Loans", "Savings & Emergency Fund",
-	"Education",
-	"Gifts & Donations",
-	"Technology & Gadgets",
-	"Travel",
-	"Subscriptions & Memberships",
+	"Groceries",                   // 0
+	"Rent & Utilities",            // 1
+	"Transportation",              // 2
+	"Healthcare",                  // 3
+	"Dining & Food",               // 4
+	"Clothing & Accessories",      // 5
+	"Entertainment",               // 6
+	"Investments & Debt & Loans",  // 7
+	"Technology & Gadgets",        // 8
+	"Subscriptions & Memberships", // 9
 }

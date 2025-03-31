@@ -186,6 +186,11 @@ func getTransactionsHandler(c *gin.Context) {
 	}
 
 	transactions, err := txnService.repo.GetTransactionsByUserID(uid)
+
+	for i, j := 0, len(transactions)-1; i < j; i, j = i+1, j-1 {
+		transactions[i], transactions[j] = transactions[j], transactions[i]
+	}
+
 	if err != nil {
 		fmt.Println(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to retrieve transactions"})
